@@ -16,7 +16,22 @@ int main(void)
     gpio_config_init();
 
     edl7141_spi_init();
-    edl7141_configure_3pwm_mode(); /* stub - see edl7141_spi.c safety note */
+
+    /* TODO: confirm on the schematic how CE and EN_DRV are wired
+     * (dedicated GPIO vs. hardwired) - they are not in the pin list
+     * this firmware was written against. PWM_CFG below is a
+     * "Standby"-only bitfield: it must be written while EN_DRV is
+     * still low/inactive, i.e. before whatever brings EN_DRV high. If
+     * EN_DRV is hardwired directly to an always-on rail with no MCU
+     * sequencing, this write may arrive too late. */
+    if (!edl7141_check_device_id()) {
+        for (;;) {
+            /* SPI to the 6EDL7141 is not responding as expected (wrong
+             * wiring, CS polarity, or EN_DRV/CE not yet powering the
+             * chip). Do not proceed to PWM/commutation. */
+        }
+    }
+    edl7141_configure_pwm_mode(); /* forces/confirms 6PWM mode, see edl7141_spi.h */
 
     commutation_init();
 

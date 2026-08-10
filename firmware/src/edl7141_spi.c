@@ -53,25 +53,17 @@ uint16_t edl7141_read_reg(uint8_t addr7)
     return edl7141_transfer(0, addr7, 0x0000);
 }
 
-void edl7141_configure_3pwm_mode(void)
+int edl7141_check_device_id(void)
 {
-    /*
-     * Intentionally not implemented.
-     *
-     * Before calling this, look up in the 6EDL7141 datasheet
-     * (section 8.2, Register Map):
-     *   - which register/bit selects 3-PWM vs 6-PWM input mode,
-     *   - dead-time configuration,
-     *   - OCP / gate-drive-current settings appropriate for the
-     *     SiZF660LDT MOSFETs on this board,
-     *   - how a phase is put into a floating/Hi-Z state while INHx is
-     *     idle (needed for BEMF sensing - see the note in
-     *     commutation.h about the driver's per-phase behavior with
-     *     INLx tied low), rather than assuming it from this driver's
-     *     PWM duty alone.
-     * Then replace this function with the real edl7141_write_reg()
-     * calls. Do not enable TIM1/apply duty on real hardware until
-     * this is done and verified with the driver's nFAULT output
-     * monitored.
-     */
+    uint16_t id = edl7141_read_reg(EDL7141_ADDR_DEVICE_ID) & 0x000FU;
+    return id == (EDL7141_DEVICE_ID_EXPECTED & 0x000FU);
+}
+
+void edl7141_configure_pwm_mode(void)
+{
+    /* See the long comment in edl7141_spi.h: this MUST stay 6PWM
+     * (0x0000) for the floating-phase BEMF sensing to work with INLx
+     * grounded. Do not change this to EDL7141_PWM_MODE_3PWM-style
+     * values. */
+    edl7141_write_reg(EDL7141_ADDR_PWM_CFG, EDL7141_PWM_MODE_6PWM);
 }
