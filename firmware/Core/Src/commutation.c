@@ -61,6 +61,11 @@ static volatile uint8_t  s_first_edge_seen = 0;
 static volatile commutation_mode_t s_mode = COMMUTATION_MODE_OPEN_LOOP;
 static volatile uint32_t s_open_loop_step_ticks = 0;
 
+volatile uint32_t g_debug_checkpoint = 0;
+volatile uint32_t g_debug_ramp_i = 0xFFFFFFFFUL;
+volatile uint32_t g_debug_tim3_count = 0;
+volatile uint32_t g_debug_exti_count = 0;
+
 static void apply_step(uint8_t step)
 {
     for (uint8_t ch = PWM_CH_INHC; ch <= PWM_CH_INHA; ch++) {
@@ -131,9 +136,11 @@ void commutation_open_loop_start(uint32_t align_duty_ticks,
     s_step = 0;
     apply_step(s_step);
     delay_us(align_time_us);
+    g_debug_checkpoint = 100; /* align done, entering ramp */
 
     /* Ramp: fixed MCU-timed steps, linearly speeding up, no BEMF. */
     for (uint32_t i = 0; i < ramp_steps; i++) {
+        g_debug_ramp_i = i;
         s_step = (uint8_t) ((s_step + 1) % 6);
         apply_step(s_step);
 
@@ -150,10 +157,13 @@ void commutation_open_loop_start(uint32_t align_duty_ticks,
 
     /* Cruise: keep commutating forever at a fixed rate via TIM3, driven
      * from TIM3_IRQHandler (re-arms itself while s_mode is open loop). */
+    g_debug_ramp_i = ramp_steps; /* ramp completed fully */
+    g_debug_checkpoint = 900;    /* about to arm TIM3 for cruise */
     s_duty_ticks = run_duty_ticks;
     apply_step(s_step);
     s_open_loop_step_ticks = cruise_step_us; /* TIM3 tick == 1us, see commutation_init() */
     tim3_schedule_delay(s_open_loop_step_ticks);
+    g_debug_checkpoint = 901; /* TIM3 armed, commutation_open_loop_start() about to return */
 }
 
 void commutation_handoff_to_closed_loop(void)
@@ -188,6 +198,7 @@ void EXTI9_5_IRQHandler(void)
         return;
     }
     EXTI->PR = pending; /* clear (write-1-to-clear) */
+    g_debug_exti_count++;
 
     if (s_mode != COMMUTATION_MODE_CLOSED_LOOP) {
         return; /* still in open-loop ramp/cruise: ignore comparator edges entirely */
@@ -224,6 +235,7 @@ void EXTI9_5_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     TIM3->SR = 0;
+    g_debug_tim3_count++;
     s_step = (uint8_t) ((s_step + 1) % 6);
     apply_step(s_step);
 

@@ -24,23 +24,31 @@ volatile float g_motor1_mech_rpm = 0.0f;
 int main(void)
 {
     system_clock_init();
+    g_debug_checkpoint = 1; /* clocks up */
     gpio_config_init(); /* EN_DRV (PB2) starts LOW here; CE is hardwired high via pull-up */
+    g_debug_checkpoint = 2; /* gpio configured */
 
     edl7141_spi_init();
+    g_debug_checkpoint = 3; /* SPI peripheral initialized */
 
     if (!edl7141_check_device_id()) {
+        g_debug_checkpoint = 0xDEAD0001UL; /* stuck here: 6EDL7141 SPI not responding */
         for (;;) {
             /* SPI to the 6EDL7141 is not responding as expected (wrong
              * wiring or CS polarity). Do not proceed to PWM/EN_DRV. */
         }
     }
+    g_debug_checkpoint = 4; /* device ID check passed */
 
     /* PWM_CFG (6PWM mode) is "Standby"-programmable: must be written
      * while EN_DRV is still low, i.e. before gpio_en_drv_set(1). */
     edl7141_configure_pwm_mode();
+    g_debug_checkpoint = 5; /* 6PWM mode written */
     gpio_en_drv_set(1); /* enable gate driver stage now that 6PWM mode is latched */
+    g_debug_checkpoint = 6; /* EN_DRV high */
 
     commutation_init();
+    g_debug_checkpoint = 7; /* TIM1/TIM2/TIM3/EXTI configured, about to start open-loop ramp */
 
     /* Open-loop only for this bring-up: aligns the rotor, ramps up,
      * then cruises forever at a fixed rate - independent of whether

@@ -3,6 +3,29 @@
 
 #include <stdint.h>
 
+/*
+ * Bring-up diagnostics: plain counters you can read in the debugger's
+ * Variables/Expressions view after a crash, no register/hex decoding
+ * needed. Add them as Expressions (Debug perspective -> Expressions
+ * view -> Add) so they're visible even if source-level Variables
+ * doesn't resolve after a fault:
+ *
+ *   g_debug_checkpoint  - main.c stage reached (see the numbered
+ *                          comments next to each assignment in main.c)
+ *   g_debug_ramp_i       - last ramp-loop iteration index reached
+ *                          (0..RAMP_STEPS-1), 0xFFFFFFFF if ramp not
+ *                          started yet, set to RAMP_STEPS once cruise begins
+ *   g_debug_tim3_count   - how many times TIM3_IRQHandler has fired
+ *   g_debug_exti_count   - how many times EXTI9_5_IRQHandler has fired
+ *                          (should stay 0 during open-loop; if it's
+ *                          nonzero, the EXTI mask fix isn't active -
+ *                          you're still running old code)
+ */
+extern volatile uint32_t g_debug_checkpoint;
+extern volatile uint32_t g_debug_ramp_i;
+extern volatile uint32_t g_debug_tim3_count;
+extern volatile uint32_t g_debug_exti_count;
+
 /* Six-step trapezoidal sensorless commutation for Motor 1.
  *
  * Sets up TIM1 (PWM), TIM2 (1 MHz timestamp base), TIM3 (30 electrical
