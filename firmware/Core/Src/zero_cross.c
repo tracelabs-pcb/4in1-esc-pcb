@@ -20,11 +20,20 @@ uint32_t zero_cross_now(void)
 
 void zero_cross_exti_init(void)
 {
-    /* GPIO/AF routing (SYSCFG EXTICR) is done in gpio_config_init(). */
+    /* GPIO/AF routing (SYSCFG EXTICR) is done in gpio_config_init().
+     *
+     * IMR (interrupt mask) is deliberately left CLEARED here - i.e. the
+     * comparator interrupts stay masked until
+     * commutation_handoff_to_closed_loop() unmasks them. During
+     * open-loop PWM switching, the phase nodes cross VSTAR on every PWM
+     * edge (the 1nF/~7kHz filter is far too slow to suppress 20kHz PWM
+     * edges), so with IMR unmasked from the start this would fire
+     * EXTI9_5_IRQHandler tens of thousands of times per second for no
+     * reason - exactly the kind of interrupt storm that caused the
+     * HardFault (UNSTKERR) seen during bring-up. */
     EXTI->RTSR |= (1UL << 6) | (1UL << 7) | (1UL << 8);
     EXTI->FTSR |= (1UL << 6) | (1UL << 7) | (1UL << 8);
     EXTI->PR   = (1UL << 6) | (1UL << 7) | (1UL << 8); /* clear stale pending */
-    EXTI->IMR |= (1UL << 6) | (1UL << 7) | (1UL << 8);
 
     NVIC->ISER[EXTI9_5_IRQn / 32] = (1UL << (EXTI9_5_IRQn % 32));
 }

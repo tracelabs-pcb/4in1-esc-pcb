@@ -137,8 +137,14 @@ void commutation_open_loop_start(uint32_t align_duty_ticks,
         s_step = (uint8_t) ((s_step + 1) % 6);
         apply_step(s_step);
 
+        /* Plain 32-bit arithmetic on purpose (not uint64_t): the Cortex-M4
+         * has no hardware 64-bit divider, a 64-bit division here would
+         * need a libgcc soft-division helper, and this project links
+         * with -nostdlib. Values are small enough (step times are tens
+         * of thousands of us, ramp_steps in the low hundreds) that the
+         * intermediate product never gets close to overflowing 32 bits. */
         uint32_t step_us = ramp_start_step_us
-            - (uint32_t) (((uint64_t) (ramp_start_step_us - ramp_end_step_us) * i) / ramp_steps);
+            - ((ramp_start_step_us - ramp_end_step_us) * i) / ramp_steps;
         delay_us(step_us);
     }
 
@@ -156,6 +162,7 @@ void commutation_handoff_to_closed_loop(void)
     s_have_period = 0;
     EXTI->PR = (1UL << 6) | (1UL << 7) | (1UL << 8); /* clear stale pending from open-loop switching noise */
     s_mode = COMMUTATION_MODE_CLOSED_LOOP;
+    EXTI->IMR |= (1UL << 6) | (1UL << 7) | (1UL << 8); /* only now unmask comparator interrupts (see zero_cross_exti_init) */
 }
 
 float commutation_get_erpm(void)

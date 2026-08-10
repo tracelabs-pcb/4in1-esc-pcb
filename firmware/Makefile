@@ -30,7 +30,7 @@ $(BUILDDIR)/startup_stm32f405xx.o: $(SRCS_S) | $(BUILDDIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(BUILDDIR)/$(TARGET).elf: $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) -o $@
+	$(CC) $(LDFLAGS) $(OBJS) -lgcc -o $@
 	$(SIZE) $@
 
 $(BUILDDIR)/$(TARGET).bin: $(BUILDDIR)/$(TARGET).elf
