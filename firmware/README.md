@@ -102,34 +102,62 @@ je abweichend programmiert. **Diesen Wert nicht auf 3PWM ändern.**
 nur im "Standby"-Zustand wirksam, d.h. der Schreibzugriff muss
 passieren, *während* `EN_DRV` noch low ist.
 
-## Offener Punkt: CE / EN_DRV Pins
+## CE / EN_DRV Pins (geklärt)
 
-Das Datenblatt beschreibt zwei zusätzliche, für den Betrieb nötige
-Pins, die in der ursprünglichen Pin-Beschreibung nicht enthalten waren:
+- **CE**: liegt fest über Pull-up auf HIGH (kein MCU-Zutun nötig,
+  Versorgungs-Sequenz startet von allein).
+- **EN_DRV**: auf **PB2**, als GPIO-Ausgang. `gpio_config_init()` setzt
+  PB2 initial LOW (Treiberstufe aus). `main.c` schreibt zuerst
+  `PWM_CFG` per SPI (muss laut Table 20 bei EN_DRV=low passieren),
+  dann `gpio_en_drv_set(1)`, um die Gate-Treiber-Stufe scharf zu
+  schalten.
 
-- **CE**: startet die Versorgungsspannungs-Sequenz (VDDB/DVDD-Ramp-Up).
-- **EN_DRV**: schaltet die eigentliche Gate-Treiber-Stufe (Ladungspumpen,
-  PWM-Pfad) scharf. Muss auf einem definierten Pegel liegen, *nachdem*
-  `PWM_CFG` per SPI geschrieben wurde (siehe oben).
+## Open-Loop-Start (Motor dreht sich)
 
-`main.c` enthält dafür einen TODO-Kommentar. Bitte im Schaltplan
-prüfen, ob CE/EN_DRV fest verdrahtet sind (z.B. auf eine
-Versorgungsspannung) oder auf weitere MCU-GPIOs geführt werden, und die
-Startreihenfolge in `main.c` ggf. entsprechend ergänzen.
+`commutation_open_loop_start()` (aufgerufen in `main.c`) macht Folgendes,
+komplett ohne BEMF/Komparator - funktioniert unabhängig davon, ob die
+Komparator-zu-Phase-Zuordnung (siehe unten) stimmt:
 
-## Weitere Punkte vor dem ersten Einschalten / ersten Spin prüfen
+1. **Alignment**: hält Schritt 0 für 500 ms mit 15 % Duty, damit der
+   Rotor in eine bekannte Position einrastet.
+2. **Rampe**: 120 Kommutierungsschritte (= 20 elektrische Umdrehungen),
+   Schrittzeit linear von 20 ms auf 3 ms verkürzt (= beschleunigt).
+3. **Cruise**: läuft danach für immer mit 3 ms/Schritt und 25 % Duty
+   weiter (per TIM3-Interrupt, blockiert `main()` nicht mehr).
+
+Alle Werte (`ALIGN_DUTY_TICKS`, `ALIGN_TIME_US`, `RAMP_START/END_STEP_US`,
+`RAMP_STEPS`, `RUN_DUTY_TICKS`) stehen als `#define` oben in `main.c`
+und sind **konservative Startwerte, keine für euren Motor/Propeller
+berechneten Werte**. Falls es beim ersten Test nicht klappt:
+
+- **Motor bewegt sich gar nicht / brummt nur**: `ALIGN_DUTY_TICKS`
+  bzw. `RUN_DUTY_TICKS` erhöhen (zu wenig Drehmoment).
+- **Motor ruckelt/rastet aus statt rund hochzulaufen**: `RAMP_START_STEP_US`
+  erhöhen (langsamerer Start) und/oder `RAMP_STEPS` erhöhen (sanftere
+  Beschleunigung) - der Rotor kann dem elektrischen Feld nicht folgen.
+- **Motor dreht, aber sehr langsam/schwach am Ende**: `RAMP_END_STEP_US`
+  verkleinern (höhere Zieldrehzahl) und/oder `RUN_DUTY_TICKS` erhöhen.
+
+`commutation_handoff_to_closed_loop()` existiert, um danach auf
+sensorlose BEMF-Kommutierung umzuschalten, wird aber in `main.c`
+aktuell nicht aufgerufen - erst testen, ob der Open-Loop-Teil zuverlässig
+dreht, dann die geschlossene Regelung separat ausprobieren (siehe
+nächster Punkt).
+
+## Weitere Punkte, insbesondere vor dem Test der geschlossenen Regelung
 
 1. **SPI-Rahmenformat**: 24-Bit-Frame (1 R/W-Bit + 7-Bit-Adresse +
-   16-Bit-Daten), SPI-Modus 1 (CPOL=0, CPHA=1) - jetzt direkt anhand
-   des vollständigen Datenblatts (Abschnitt 7.1.2, inkl. dessen
-   eigenem Rechenbeispiel) verifiziert und bestätigt.
-2. **Komparator-zu-Pin-Zuordnung**: Es wird angenommen Phase A → PB6,
-   Phase B → PB7, Phase C → PB8 (siehe `PHASE_A_LINE` usw. in
-   `commutation.c`). Gegen das Schaltplan-Netzlisting prüfen.
-3. **HSE-Frequenz**: `HSE_VALUE_HZ` in `system_clock.h` ist auf 8 MHz
-   gesetzt (Standardannahme) - an den tatsächlich bestückten Quarz
-   anpassen, sonst stimmen PWM-Frequenz, eRPM-Berechnung und SPI-Timing
-   nicht.
+   16-Bit-Daten), SPI-Modus 1 (CPOL=0, CPHA=1) - direkt anhand des
+   vollständigen Datenblatts (Abschnitt 7.1.2, inkl. dessen eigenem
+   Rechenbeispiel) verifiziert und bestätigt.
+2. **Komparator-zu-Phase-Zuordnung**: bestätigt ist, dass PB6/PB7/PB8 =
+   LM2901-Komparatorausgänge 1/2/3 sind (EXTI6/7/8). **Nicht bestätigt**
+   ist, welche Motorphase (A/B/C bzw. U/V/W) auf IN+ von Komparator 1
+   vs. 2 vs. 3 liegt - die Firmware nimmt 1→A, 2→B, 3→C an
+   (`PHASE_A_LINE` usw. in `commutation.c`). Das betrifft nur
+   `commutation_handoff_to_closed_loop()`, nicht den Open-Loop-Start.
+3. **HSE-Frequenz**: 8 MHz bestätigt, passt zum Default in
+   `system_clock.h`.
 4. **IDRIVE_CFG / DT_CFG / OCP-Register**: bleiben auf Werksreset-Werten
    stehen (nicht explizit programmiert). Gate-Treiberstrom und
    Überstromschwellen ggf. auf die SiZF660LDT-MOSFETs abstimmen -
@@ -138,11 +166,6 @@ Startreihenfolge in `main.c` ggf. entsprechend ergänzen.
 
 ## Was fehlt (bewusst außerhalb des Scopes)
 
-- **Open-Loop-Start/Alignment**: Aus dem Stillstand liefert kein Motor
-  ein auswertbares BEMF-Signal. Diese Firmware kommutiert ausschließlich
-  über erkannte Nulldurchgänge - für den Start wird zusätzlich eine
-  Alignment- + Open-Loop-Ramp-Stufe benötigt, die hier nicht enthalten
-  ist.
 - DSHOT/PWM-Empfang, Telemetrie-UART, Strommessung (INA180A3),
   Fehlerbehandlung über nFAULT: nicht Teil dieser Abgabe.
 - Motor 2-4 (identischer Aufbau auf TIM8/TIM... bzw. weiteren SPI/EXTI-

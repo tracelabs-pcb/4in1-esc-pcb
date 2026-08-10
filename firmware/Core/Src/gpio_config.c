@@ -67,4 +67,15 @@ void gpio_config_init(void)
     SYSCFG->EXTICR[1] = (SYSCFG->EXTICR[1] & ~(0xFUL << 8))  | (0x1UL << 8);  /* EXTI6 -> PB */
     SYSCFG->EXTICR[1] = (SYSCFG->EXTICR[1] & ~(0xFUL << 12)) | (0x1UL << 12); /* EXTI7 -> PB */
     SYSCFG->EXTICR[2] = (SYSCFG->EXTICR[2] & ~(0xFUL << 0))  | (0x1UL << 0);  /* EXTI8 -> PB */
+
+    /* PB2 -> 6EDL7141 EN_DRV, push-pull GPIO output, idle LOW (driver
+     * stage stays disabled until gpio_en_drv_set(1) is called). */
+    gpio_set_mode(GPIOB, 2, GPIO_MODE_OUTPUT);
+    gpio_set_pupd_none(GPIOB, 2);
+    GPIOB->BSRR = (1UL << (2 + 16)); /* EN_DRV = 0 */
+}
+
+void gpio_en_drv_set(int enable)
+{
+    GPIOB->BSRR = enable ? (1UL << 2) : (1UL << (2 + 16));
 }
