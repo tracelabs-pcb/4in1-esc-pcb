@@ -22,9 +22,24 @@
 #define EDL7141_ADDR_FAULT_ST       0x00U
 #define EDL7141_ADDR_DEVICE_ID      0x07U
 #define EDL7141_ADDR_PWM_CFG        0x13U
+#define EDL7141_ADDR_CSAMP_CFG      0x1DU
 
 /* PWM_CFG (0x13) reset value 0x0000 = PWM_MODE b000 = 6PWM mode. */
 #define EDL7141_PWM_MODE_6PWM       0x0000U
+
+/* CSAMP_CFG (0x1D) reset value 0x0028 = CS_GAIN_ANA=1, CS_EN=b010 (only
+ * phase B's current-sense amplifier enabled - an odd reset default,
+ * but confirmed against the datasheet register table). This board has
+ * no shunt resistors wired to the driver's CSNx/CSOx pins at all (a
+ * separate INA180A3 + STM32 ADC handles total board current instead),
+ * so phase B's amplifier floats and its internal OCP comparator trips
+ * on noise (CS_OCP_FLT in FAULT_ST). Fix: disable all three amplifiers
+ * (CS_EN=000), keeping CS_GAIN_ANA at its reset value untouched - this
+ * is exactly what the datasheet recommends for unused current-sense
+ * amplifiers. CS_EN is "Always" programmable, no EN_DRV sequencing
+ * constraint, but configure it before EN_DRV anyway to avoid ever
+ * seeing the spurious fault at all. */
+#define EDL7141_CSAMP_CFG_CS_DISABLED 0x0008U
 
 /* DEVICE_ID (0x07) reset value 0x0006, DEV_ID in bits[3:0] -> read-only,
  * usable as a "is SPI actually talking to the chip" sanity check. */
@@ -64,5 +79,11 @@ int edl7141_check_device_id(void);
  * relying on this sequencing.
  */
 void edl7141_configure_pwm_mode(void);
+
+/* Disables all three internal current-sense amplifiers (CS_EN=000 in
+ * CSAMP_CFG) - see the long comment above EDL7141_CSAMP_CFG_CS_DISABLED.
+ * Call this on boards where the CSNx/CSOx pins aren't wired to real
+ * shunt resistors, to avoid spurious CS_OCP_FLT faults. */
+void edl7141_disable_unused_current_sense(void);
 
 #endif /* EDL7141_SPI_H */

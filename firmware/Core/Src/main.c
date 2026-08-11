@@ -70,6 +70,12 @@ int main(void)
      * goes high - PWM_MODE only latches while EN_DRV is low. */
     edl7141_configure_pwm_mode();
 
+    /* This board has no shunt resistors on the driver's CSNx/CSOx pins
+     * (confirmed unbeschaltet) - disable all 3 internal current-sense
+     * amplifiers so the floating phase-B amplifier (enabled by reset
+     * default) can't spuriously trip CS_OCP_FLT. See edl7141_spi.h. */
+    edl7141_disable_unused_current_sense();
+
     gpio_en_drv_set(1);
     delay_approx_ms(20); /* let charge pumps/output stage settle before checking for faults */
 

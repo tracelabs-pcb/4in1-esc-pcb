@@ -67,3 +67,8 @@ void edl7141_configure_pwm_mode(void)
      * values. */
     edl7141_write_reg(EDL7141_ADDR_PWM_CFG, EDL7141_PWM_MODE_6PWM);
 }
+
+void edl7141_disable_unused_current_sense(void)
+{
+    edl7141_write_reg(EDL7141_ADDR_CSAMP_CFG, EDL7141_CSAMP_CFG_CS_DISABLED);
+}
