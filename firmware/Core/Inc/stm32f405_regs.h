@@ -69,6 +69,7 @@ typedef struct {
 
 #define GPIOA_BASE  (AHB1PERIPH_BASE + 0x0000UL)
 #define GPIOB_BASE  (AHB1PERIPH_BASE + 0x0400UL)
+#define GPIOC_BASE  (AHB1PERIPH_BASE + 0x0800UL)
 #define RCC_BASE    (AHB1PERIPH_BASE + 0x3800UL)
 #define FLASH_R_BASE (AHB1PERIPH_BASE + 0x3C00UL)
 
@@ -113,6 +114,7 @@ typedef struct {
 
 #define RCC_AHB1ENR_GPIOAEN (1UL << 0)
 #define RCC_AHB1ENR_GPIOBEN (1UL << 1)
+#define RCC_AHB1ENR_GPIOCEN (1UL << 2)
 
 #define RCC_APB1ENR_TIM2EN  (1UL << 0)
 #define RCC_APB1ENR_TIM3EN  (1UL << 1)
@@ -165,6 +167,7 @@ typedef struct {
 
 #define GPIOA ((GPIO_TypeDef *) GPIOA_BASE)
 #define GPIOB ((GPIO_TypeDef *) GPIOB_BASE)
+#define GPIOC ((GPIO_TypeDef *) GPIOC_BASE)
 
 #define GPIO_MODE_INPUT  0x0UL
 #define GPIO_MODE_OUTPUT 0x1UL
