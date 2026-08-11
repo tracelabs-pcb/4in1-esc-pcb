@@ -29,6 +29,21 @@ static void led_set(int high)
     GPIOC->BSRR = high ? (1UL << 13) : (1UL << (13 + 16));
 }
 
+/* Bicolor LED on a single pin (HIGH=green, LOW=red) has no "off" via
+ * BSRR alone - LOW just lights red. For a real green/dark blink,
+ * switch PC13 to input (Hi-Z) instead of driving it low: no current
+ * through either LED die, so it goes dark rather than red. */
+static void led_off_hiz(void)
+{
+    GPIOC->MODER &= ~(0x3UL << (13 * 2)); /* PC13 -> input */
+}
+
+static void led_green_on(void)
+{
+    GPIOC->MODER = (GPIOC->MODER & ~(0x3UL << (13 * 2))) | (0x1UL << (13 * 2)); /* PC13 -> output */
+    GPIOC->BSRR = (1UL << 13); /* drive high = green */
+}
+
 static void delay_approx_ms(uint32_t ms)
 {
     for (uint32_t i = 0; i < ms; i++) {
@@ -97,11 +112,11 @@ int main(void)
         fail_forever();     /* step 3 (EN_DRV + fault check) failed - see g_debug_fault_st */
     }
 
-    /* Step 3 passed: blink green forever. */
+    /* Step 3 passed: blink green (green/dark, not green/red) forever. */
     for (;;) {
-        led_set(1);
+        led_green_on();
         delay_approx_ms(300);
-        led_set(0);
+        led_off_hiz();
         delay_approx_ms(300);
     }
 }
