@@ -1,18 +1,24 @@
 #include "system_clock.h"
 #include "gpio_config.h"
 #include "edl7141_spi.h"
+#include "pwm_tim1.h"
 #include "stm32f405_regs.h"
 
 /*
- * Minimal bring-up step 3: enable EN_DRV (gate driver output stage /
- * charge pumps) and check FAULT_ST over SPI - still no PWM, no EXTI,
- * TIM1/PA8-10 stay unconfigured as far as this file is concerned, so
- * the MOSFET gates see nothing from the driver's high side outputs.
+ * Minimal bring-up step 4: initialize TIM1/PWM (PA8/9/10 -> INHC/B/A)
+ * with all three channels held at 0% duty, then re-check FAULT_ST.
+ *
+ * Still safe: at 0% duty, INHx=0 on all channels, and with INLx
+ * hardwired to GND in 6PWM mode that means GHx=LOW/GLx=LOW/SHx=High-Z
+ * on all three phases (see the long comment in edl7141_spi.h) - no
+ * MOSFET gets driven at all. This step only tests that TIM1 itself
+ * starts cleanly and doesn't provoke a new fault (e.g. extra load on
+ * the buck regulator), not that anything moves.
  *
  * LED convention (PC13), building up step by step:
  *   solid red      -> a check failed, stopped here, do not proceed
- *   blinking green -> this step (EN_DRV + fault check) passed
- *   solid green    -> reserved for the next step after this one
+ *   blinking green -> step 3 (EN_DRV + fault check) passed
+ *   solid green    -> step 4 (TIM1 PWM init @ 0% duty + fault check) passed
  */
 
 #define APPROX_MS_LOOP_COUNT 16800U /* crude, uncalibrated busy-wait unit at ~168MHz */
@@ -59,6 +65,7 @@ static void delay_approx_ms(uint32_t ms)
  *                                    that actually decides pass/fail) */
 volatile uint16_t g_debug_fault_st_before_clear = 0xFFFFU;
 volatile uint16_t g_debug_fault_st = 0xFFFFU;
+volatile uint16_t g_debug_fault_st_after_pwm_init = 0xFFFFU; /* step 4 */
 
 static void fail_forever(void)
 {
@@ -112,11 +119,29 @@ int main(void)
         fail_forever();     /* step 3 (EN_DRV + fault check) failed - see g_debug_fault_st */
     }
 
-    /* Step 3 passed: blink green (green/dark, not green/red) forever. */
-    for (;;) {
+    /* Step 3 passed: a few green/dark blinks as a visual checkpoint,
+     * then move on to step 4. */
+    for (int i = 0; i < 4; i++) {
         led_green_on();
         delay_approx_ms(300);
         led_off_hiz();
         delay_approx_ms(300);
+    }
+
+    /* Step 4: TIM1 PWM init, all channels at 0% duty (see the comment
+     * at the top of this file for why that's still safe), then
+     * re-check for any newly provoked fault. */
+    pwm_tim1_init();
+    delay_approx_ms(20);
+
+    g_debug_fault_st_after_pwm_init = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
+    if (g_debug_fault_st_after_pwm_init != 0x0000U) {
+        gpio_en_drv_set(0);
+        fail_forever(); /* step 4 failed - see g_debug_fault_st_after_pwm_init */
+    }
+
+    /* Step 4 passed: solid green forever. */
+    led_green_on();
+    for (;;) {
     }
 }
