@@ -72,3 +72,8 @@ void edl7141_disable_unused_current_sense(void)
 {
     edl7141_write_reg(EDL7141_ADDR_CSAMP_CFG, EDL7141_CSAMP_CFG_CS_DISABLED);
 }
+
+void edl7141_clear_faults(void)
+{
+    edl7141_write_reg(EDL7141_ADDR_FAULTS_CLR, EDL7141_FAULTS_CLR_ALL);
+}

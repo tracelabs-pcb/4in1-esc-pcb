@@ -37,8 +37,12 @@ static void delay_approx_ms(uint32_t ms)
     }
 }
 
-/* Exposed for the debugger: raw FAULT_ST (address 0x00) read right
- * after enabling EN_DRV, in case the pass/fail LED needs a second look. */
+/* Exposed for the debugger: raw FAULT_ST (address 0x00) reads, in case
+ * the pass/fail LED needs a second look.
+ *   g_debug_fault_st_before_clear - right after EN_DRV, before clearing
+ *   g_debug_fault_st              - after writing FAULTS_CLR (the one
+ *                                    that actually decides pass/fail) */
+volatile uint16_t g_debug_fault_st_before_clear = 0xFFFFU;
 volatile uint16_t g_debug_fault_st = 0xFFFFU;
 
 static void fail_forever(void)
@@ -78,6 +82,14 @@ int main(void)
 
     gpio_en_drv_set(1);
     delay_approx_ms(20); /* let charge pumps/output stage settle before checking for faults */
+
+    /* FAULT_ST bits stay set once tripped until explicitly cleared,
+     * even after the triggering condition is gone (e.g. a one-off
+     * startup transient). Record the raw pre-clear value for
+     * debugging, then clear and re-read to see the real ongoing state. */
+    g_debug_fault_st_before_clear = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
+    edl7141_clear_faults();
+    delay_approx_ms(5);
 
     g_debug_fault_st = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
     if (g_debug_fault_st != 0x0000U) {

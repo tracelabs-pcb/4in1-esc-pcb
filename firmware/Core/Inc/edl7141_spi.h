@@ -21,8 +21,18 @@
 
 #define EDL7141_ADDR_FAULT_ST       0x00U
 #define EDL7141_ADDR_DEVICE_ID      0x07U
+#define EDL7141_ADDR_FAULTS_CLR     0x10U
 #define EDL7141_ADDR_PWM_CFG        0x13U
 #define EDL7141_ADDR_CSAMP_CFG      0x1DU
+
+/* FAULTS_CLR (0x10): bit0 CLR_FLTS (clear non-latched faults), bit1
+ * CLR_LATCH (clear latched faults). Per the datasheet, FAULT_ST bits
+ * stay set once tripped "independently of latch configuration" until
+ * explicitly cleared - so a one-off startup transient (e.g. from the
+ * CS_OCP_FLT false trigger before CSAMP_CFG was fixed) can leave a
+ * stale bit sitting in FAULT_ST forever even after the real cause is
+ * gone. Write both bits to clear everything regardless of latch type. */
+#define EDL7141_FAULTS_CLR_ALL      0x0003U
 
 /* PWM_CFG (0x13) reset value 0x0000 = PWM_MODE b000 = 6PWM mode. */
 #define EDL7141_PWM_MODE_6PWM       0x0000U
@@ -85,5 +95,8 @@ void edl7141_configure_pwm_mode(void);
  * Call this on boards where the CSNx/CSOx pins aren't wired to real
  * shunt resistors, to avoid spurious CS_OCP_FLT faults. */
 void edl7141_disable_unused_current_sense(void);
+
+/* Clears all fault status bits (latched and non-latched) in FAULT_ST. */
+void edl7141_clear_faults(void);
 
 #endif /* EDL7141_SPI_H */
