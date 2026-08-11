@@ -4,14 +4,18 @@
 #include "stm32f405_regs.h"
 
 /*
- * Minimal bring-up step 2: confirm SPI *writes* reach the 6EDL7141 too
- * (step 1 only proved reads work), then leave PWM_CFG in the real
- * desired 6PWM state. Still no EN_DRV, no PWM, no EXTI - the gate
- * driver's output stage stays disabled, MOSFETs are not involved at all.
+ * Minimal bring-up step 3: enable EN_DRV (gate driver output stage /
+ * charge pumps) and check FAULT_ST over SPI - still no PWM, no EXTI,
+ * TIM1/PA8-10 stay unconfigured as far as this file is concerned, so
+ * the MOSFET gates see nothing from the driver's high side outputs.
  *
- * PC13 status LED: HIGH = green (device ID read AND a distinct SPI
- * write/read-back both checked out), LOW = red (something failed).
+ * LED convention (PC13), building up step by step:
+ *   solid red      -> a check failed, stopped here, do not proceed
+ *   blinking green -> this step (EN_DRV + fault check) passed
+ *   solid green    -> reserved for the next step after this one
  */
+
+#define APPROX_MS_LOOP_COUNT 16800U /* crude, uncalibrated busy-wait unit at ~168MHz */
 
 static void led_init(void)
 {
@@ -25,32 +29,61 @@ static void led_set(int high)
     GPIOC->BSRR = high ? (1UL << 13) : (1UL << (13 + 16));
 }
 
+static void delay_approx_ms(uint32_t ms)
+{
+    for (uint32_t i = 0; i < ms; i++) {
+        for (volatile uint32_t j = 0; j < APPROX_MS_LOOP_COUNT; j++) {
+        }
+    }
+}
+
+/* Exposed for the debugger: raw FAULT_ST (address 0x00) read right
+ * after enabling EN_DRV, in case the pass/fail LED needs a second look. */
+volatile uint16_t g_debug_fault_st = 0xFFFFU;
+
+static void fail_forever(void)
+{
+    led_set(0);
+    for (;;) {
+    }
+}
+
 int main(void)
 {
     system_clock_init();
-    gpio_config_init(); /* sets up SPI1 (PB3/4/5) and nCS (PB12) among other things */
+    gpio_config_init(); /* sets up SPI1 (PB3/4/5), nCS (PB12), EN_DRV (PB2, starts LOW) */
     led_init();
 
     edl7141_spi_init();
 
-    int id_ok = edl7141_check_device_id();
+    if (!edl7141_check_device_id()) {
+        fail_forever(); /* step 1 (SPI read) failed */
+    }
 
-    /* Write a distinct, harmless test pattern to PWM_CFG (BRAKE_CFG =
-     * b10 "High-Z/no power", PWM_MODE = b000 "6PWM") and read it back.
-     * Using a non-zero value here (rather than testing with 6PWM's
-     * 0x0000 directly) proves the write path actually works, since
-     * 0x0000 is also PWM_CFG's power-on-reset value and would read
-     * back the same even if the write silently did nothing. */
-    uint16_t test_pattern = 0x0020U;
+    uint16_t test_pattern = 0x0020U; /* BRAKE_CFG=b10 (High-Z), PWM_MODE=b000 (6PWM) */
     edl7141_write_reg(EDL7141_ADDR_PWM_CFG, test_pattern);
-    int write_ok = (edl7141_read_reg(EDL7141_ADDR_PWM_CFG) == test_pattern);
+    if (edl7141_read_reg(EDL7141_ADDR_PWM_CFG) != test_pattern) {
+        fail_forever(); /* step 2 (SPI write) failed */
+    }
 
-    /* Leave PWM_CFG in the real desired end state (6PWM, see the long
-     * comment in edl7141_spi.h) regardless of the test above. */
+    /* Leave PWM_CFG in the real desired end state (6PWM) before EN_DRV
+     * goes high - PWM_MODE only latches while EN_DRV is low. */
     edl7141_configure_pwm_mode();
 
-    led_set(id_ok && write_ok);
+    gpio_en_drv_set(1);
+    delay_approx_ms(20); /* let charge pumps/output stage settle before checking for faults */
 
+    g_debug_fault_st = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
+    if (g_debug_fault_st != 0x0000U) {
+        gpio_en_drv_set(0); /* something's wrong, disable the driver stage again */
+        fail_forever();     /* step 3 (EN_DRV + fault check) failed - see g_debug_fault_st */
+    }
+
+    /* Step 3 passed: blink green forever. */
     for (;;) {
+        led_set(1);
+        delay_approx_ms(300);
+        led_set(0);
+        delay_approx_ms(300);
     }
 }
