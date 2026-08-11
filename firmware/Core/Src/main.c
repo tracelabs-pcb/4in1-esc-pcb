@@ -15,10 +15,18 @@
  * starts cleanly and doesn't provoke a new fault (e.g. extra load on
  * the buck regulator), not that anything moves.
  *
+ * Step 5: apply 5% duty on phase A (PWM_CH_INHA) only, for ~3 seconds,
+ * so the first real switching event can be watched on a scope
+ * (GHA-SHA, SHA-GND, PA10 as trigger reference, GLA-GND as the real
+ * shoot-through check). Auto-stops back to 0% after ~3s regardless of
+ * what's observed, then re-checks FAULT_ST.
+ *
  * LED convention (PC13), building up step by step:
- *   solid red      -> a check failed, stopped here, do not proceed
- *   blinking green -> step 3 (EN_DRV + fault check) passed
- *   solid green    -> step 4 (TIM1 PWM init @ 0% duty + fault check) passed
+ *   solid red       -> a check failed, stopped here, do not proceed
+ *   blinking green  -> step 3 (EN_DRV + fault check) passed
+ *   4x green blinks -> step 4 (TIM1 PWM init @ 0% duty + fault check) passed
+ *   fast green blink-> step 5 test pulse actively running (~3s)
+ *   solid green     -> step 5 passed, test pulse finished cleanly
  */
 
 #define APPROX_MS_LOOP_COUNT 16800U /* crude, uncalibrated busy-wait unit at ~168MHz */
@@ -66,6 +74,7 @@ static void delay_approx_ms(uint32_t ms)
 volatile uint16_t g_debug_fault_st_before_clear = 0xFFFFU;
 volatile uint16_t g_debug_fault_st = 0xFFFFU;
 volatile uint16_t g_debug_fault_st_after_pwm_init = 0xFFFFU; /* step 4 */
+volatile uint16_t g_debug_fault_st_after_step5 = 0xFFFFU;    /* step 5 */
 
 static void fail_forever(void)
 {
@@ -140,7 +149,32 @@ int main(void)
         fail_forever(); /* step 4 failed - see g_debug_fault_st_after_pwm_init */
     }
 
-    /* Step 4 passed: solid green forever. */
+    /* Step 4 passed: brief solid green, then move on to step 5. */
+    led_green_on();
+    delay_approx_ms(1000);
+    led_off_hiz();
+    delay_approx_ms(300);
+
+    /* Step 5: 5% duty on phase A only (~420/8399 ticks), ~3 seconds,
+     * fast-blinking green while it runs so it's obvious on the board
+     * that the test is live. INHB/INHC stay at 0% (untouched). */
+    pwm_tim1_set_duty(PWM_CH_INHA, (PWM_ARR_TICKS * 5U) / 100U);
+    for (int i = 0; i < 30; i++) {
+        led_green_on();
+        delay_approx_ms(50);
+        led_off_hiz();
+        delay_approx_ms(50);
+    }
+    pwm_tim1_set_duty(PWM_CH_INHA, 0); /* back to 0% - phase A floats again */
+    delay_approx_ms(20);
+
+    g_debug_fault_st_after_step5 = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
+    if (g_debug_fault_st_after_step5 != 0x0000U) {
+        gpio_en_drv_set(0);
+        fail_forever(); /* step 5 failed - see g_debug_fault_st_after_step5 */
+    }
+
+    /* Step 5 passed: solid green forever. */
     led_green_on();
     for (;;) {
     }
