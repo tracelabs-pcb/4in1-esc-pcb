@@ -103,6 +103,29 @@ static void fail_forever(void)
     }
 }
 
+/* Exposed for the debugger: raw fault-status registers, captured the
+ * instant a HardFault happens (see stm32f405_regs.h for the individual
+ * SCB_CFSR_ and SCB_HFSR_ bit meanings). Previously this project had
+ * no real HardFault_Handler (only the startup file's weak
+ * Default_Handler, which just loops forever) - meaning any crash was
+ * indistinguishable from a plain infinite loop in the debugger, since
+ * both showed up as "stuck in Default_Handler". This makes a real
+ * crash diagnosable. */
+volatile uint32_t g_debug_fault_cfsr = 0;
+volatile uint32_t g_debug_fault_hfsr = 0;
+volatile uint32_t g_debug_fault_mmfar = 0;
+volatile uint32_t g_debug_fault_bfar = 0;
+
+void HardFault_Handler(void)
+{
+    g_debug_fault_cfsr = SCB->CFSR;
+    g_debug_fault_hfsr = SCB->HFSR;
+    g_debug_fault_mmfar = SCB->MMFAR;
+    g_debug_fault_bfar = SCB->BFAR;
+    gpio_en_drv_set(0); /* stop driving the motor immediately */
+    fail_forever();     /* see g_debug_fault_cfsr/hfsr/mmfar/bfar */
+}
+
 int main(void)
 {
     system_clock_init();

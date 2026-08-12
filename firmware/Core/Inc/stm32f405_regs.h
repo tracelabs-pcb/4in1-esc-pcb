@@ -42,12 +42,38 @@ typedef struct {
     __IO uint32_t CCR;
     __IO uint8_t  SHP[12];
     __IO uint32_t SHCSR;
+    __IO uint32_t CFSR;  /* MMFSR (bits 7:0) | BFSR (15:8) | UFSR (31:16) */
+    __IO uint32_t HFSR;
+    __IO uint32_t DFSR;
+    __IO uint32_t MMFAR;
+    __IO uint32_t BFAR;
+    __IO uint32_t AFSR;
 } SCB_TypeDef;
 
 #define NVIC_BASE   (0xE000E100UL)
 #define SCB_BASE    (0xE000ED00UL)
 #define NVIC        ((NVIC_TypeDef *) NVIC_BASE)
 #define SCB         ((SCB_TypeDef  *) SCB_BASE)
+
+/* CFSR bits worth naming for quick lookup while debugging (ARMv7-M). */
+#define SCB_CFSR_IACCVIOL   (1UL << 0)   /* MMFSR: instruction access violation */
+#define SCB_CFSR_DACCVIOL   (1UL << 1)   /* MMFSR: data access violation */
+#define SCB_CFSR_MUNSTKERR  (1UL << 3)   /* MMFSR: fault on exception return unstacking */
+#define SCB_CFSR_MSTKERR    (1UL << 4)   /* MMFSR: fault on exception entry stacking */
+#define SCB_CFSR_MMARVALID  (1UL << 7)   /* MMFSR: MMFAR holds a valid address */
+#define SCB_CFSR_IBUSERR    (1UL << 8)   /* BFSR: instruction bus error */
+#define SCB_CFSR_PRECISERR  (1UL << 9)   /* BFSR: precise data bus error */
+#define SCB_CFSR_IMPRECISERR (1UL << 10) /* BFSR: imprecise data bus error */
+#define SCB_CFSR_UNSTKERR   (1UL << 11)  /* BFSR: fault on exception return unstacking */
+#define SCB_CFSR_STKERR     (1UL << 12)  /* BFSR: fault on exception entry stacking */
+#define SCB_CFSR_BFARVALID  (1UL << 15)  /* BFSR: BFAR holds a valid address */
+#define SCB_CFSR_UNDEFINSTR (1UL << 16)  /* UFSR: undefined instruction */
+#define SCB_CFSR_INVSTATE   (1UL << 17)  /* UFSR: invalid EPSR/interworking state */
+#define SCB_CFSR_INVPC      (1UL << 18)  /* UFSR: invalid PC / bad exception return */
+#define SCB_CFSR_NOCP       (1UL << 19)  /* UFSR: no coprocessor (e.g. FPU) */
+#define SCB_CFSR_UNALIGNED  (1UL << 24)  /* UFSR: unaligned access */
+#define SCB_CFSR_DIVBYZERO  (1UL << 25)  /* UFSR: integer divide by zero */
+#define SCB_HFSR_FORCED     (1UL << 30)  /* a configurable fault escalated to HardFault */
 
 /* ------------------------------------------------------------------ */
 /* Peripheral base addresses                                          */
