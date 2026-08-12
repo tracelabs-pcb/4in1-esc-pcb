@@ -182,10 +182,16 @@ int main(void)
     delay_approx_ms(300);
 
     /* Step 5, repeating forever: ~6s slow "get ready" blink (arm the
-     * scope trigger any time in this window), then 5% duty on phase A
+     * scope trigger any time in this window), then 5% duty on phase B
      * only (~420/8399 ticks) for ~3s with fast blink, then back to 0%
-     * and a fault re-check before looping around again. INHB/INHC stay
-     * at 0% throughout. */
+     * and a fault re-check before looping around again. INHA/INHC stay
+     * at 0% throughout.
+     *
+     * Switched from phase A to phase B here specifically to isolate
+     * whether phase A alone is affected (localized issue: gate
+     * resistor, solder joint, that specific MOSFET) or every phase
+     * behaves the same (points at something common to the driver, e.g.
+     * its whole high-side stage). */
     for (;;) {
         for (int i = 0; i < 6; i++) {
             led_green_on();
@@ -194,7 +200,7 @@ int main(void)
             delay_approx_ms(500);
         }
 
-        pwm_tim1_set_duty(PWM_CH_INHA, (PWM_ARR_TICKS * 5U) / 100U);
+        pwm_tim1_set_duty(PWM_CH_INHB, (PWM_ARR_TICKS * 5U) / 100U);
         for (int i = 0; i < 30; i++) {
             /* Live UVLO/OVLO status while the pulse is actually running -
              * VCCLS/VCCHS UVLO forces Hi-Z outputs independently of
@@ -207,7 +213,7 @@ int main(void)
             led_off_hiz();
             delay_approx_ms(50);
         }
-        pwm_tim1_set_duty(PWM_CH_INHA, 0); /* back to 0% - phase A floats again */
+        pwm_tim1_set_duty(PWM_CH_INHB, 0); /* back to 0% - phase B floats again */
         delay_approx_ms(20);
 
         g_debug_fault_st_after_step5 = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
