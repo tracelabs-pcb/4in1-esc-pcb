@@ -56,8 +56,14 @@ static void led_init(void)
     GPIOC->PUPDR &= ~(0x3UL << (13 * 2));
 }
 
+/* Unlike led_green_on()/led_off_hiz(), this can be called at any time -
+ * including from fail_forever(), where PC13 might currently be Hi-Z
+ * (mid-blink) rather than already an output. Forcing MODER here first
+ * means "solid red" always actually lights up, instead of silently
+ * staying dark if a fault happens to land during a Hi-Z window. */
 static void led_set(int high)
 {
+    GPIOC->MODER = (GPIOC->MODER & ~(0x3UL << (13 * 2))) | (0x1UL << (13 * 2)); /* PC13 -> output */
     GPIOC->BSRR = high ? (1UL << 13) : (1UL << (13 + 16));
 }
 
