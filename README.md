@@ -47,8 +47,9 @@ Gate-Treibern und integrierter Strommessung.
 
 ## Ausschlüsse
 
-Eigenentwicklung / Portfolioprojekt — kein Serienprodukt,
-kein CE/EMV, keine Firmware.
+Eigenentwicklung / Portfolioprojekt — kein Serienprodukt, kein CE/EMV.
+Firmware (Motor-1-Kommutierung) in `/firmware/`, siehe dortige README
+für Einschränkungen und offene Punkte vor dem ersten Spin.
 
 ---
 
@@ -56,6 +57,7 @@ kein CE/EMV, keine Firmware.
 
 - `/kicad/` — KiCad Projektdateien
 - `/screenshots/` — PCB- und Schematic-Ansichten
+- `/firmware/` — Bare-metal STM32F405-Firmware, Motor-1-Kommutierung
 
 ---
 
