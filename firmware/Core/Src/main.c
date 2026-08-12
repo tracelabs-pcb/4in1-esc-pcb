@@ -80,6 +80,7 @@ volatile uint16_t g_debug_fault_st_before_clear = 0xFFFFU;
 volatile uint16_t g_debug_fault_st = 0xFFFFU;
 volatile uint16_t g_debug_fault_st_after_pwm_init = 0xFFFFU; /* step 4 */
 volatile uint16_t g_debug_fault_st_after_step5 = 0xFFFFU;    /* step 5 */
+volatile uint16_t g_debug_supply_st = 0xFFFFU; /* live UVLO/OVLO status, see edl7141_spi.h */
 
 static void fail_forever(void)
 {
@@ -184,6 +185,11 @@ int main(void)
 
         pwm_tim1_set_duty(PWM_CH_INHA, (PWM_ARR_TICKS * 5U) / 100U);
         for (int i = 0; i < 30; i++) {
+            /* Live UVLO/OVLO status while the pulse is actually running -
+             * VCCLS/VCCHS UVLO forces Hi-Z outputs independently of
+             * FAULT_ST/EN_DRV/nBRAKE, so this is worth catching mid-pulse
+             * rather than only afterward. See edl7141_spi.h. */
+            g_debug_supply_st = edl7141_read_reg(EDL7141_ADDR_SUPPLY_ST);
             led_green_on();
             delay_approx_ms(50);
             led_off_hiz();

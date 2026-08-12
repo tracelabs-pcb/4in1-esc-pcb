@@ -20,7 +20,23 @@
  */
 
 #define EDL7141_ADDR_FAULT_ST       0x00U
+#define EDL7141_ADDR_SUPPLY_ST      0x02U
+#define EDL7141_ADDR_FUNC_ST        0x03U
 #define EDL7141_ADDR_DEVICE_ID      0x07U
+
+/* SUPPLY_ST (0x02) is a LIVE status register (unlike FAULT_ST, which
+ * latches until cleared) - bits[5:0] read the current UVLO/OVLO state
+ * of the charge pumps and internal regulators, b1 = above threshold
+ * (healthy). Per the datasheet's fault table, VCCLS/VCCHS UVLO force
+ * all MOSFET outputs to Hi-Z "independently of fault handling" - i.e.
+ * independently of FAULT_ST/EN_DRV/nBRAKE - so this is worth checking
+ * directly if INHx is confirmed reaching the driver (SPI, EN_DRV,
+ * nBRAKE all good) but the gates still never move.
+ *   bit0 VCCLS_UVST, bit1 VCCHS_UVST, bit2 DVDD_UVST,
+ *   bit3 DVDD_OVST,  bit4 VDDB_UVST,  bit5 VDDB_OVST
+ * All-healthy reads as 0x003F (bits 0-5 all 1); bits 12:6 are a PVDD
+ * ADC reading (informational, not a threshold flag). */
+#define EDL7141_SUPPLY_ST_ALL_HEALTHY 0x003FU
 #define EDL7141_ADDR_FAULTS_CLR     0x10U
 #define EDL7141_ADDR_PWM_CFG        0x13U
 #define EDL7141_ADDR_CSAMP_CFG      0x1DU
