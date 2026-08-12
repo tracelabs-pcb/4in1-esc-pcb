@@ -89,13 +89,20 @@ static void tim3_schedule_delay(uint32_t delay_ticks)
     TIM3->CR1 |= TIM_CR1_CEN; /* one-pulse mode: runs once, CEN self-clears */
 }
 
-/* Busy-wait using the free-running 1 MHz TIM2 timestamp (see
- * zero_cross.c) - simple and accurate enough for the open-loop
- * alignment/ramp stage, which has no need to be interrupt-driven. */
+/* Calibrated busy-wait, same technique/constant as main.c's
+ * delay_approx_ms() (proven reliable across every bring-up step so
+ * far - PWM timing, LED timing). Originally this used the free-running
+ * TIM2 timestamp (zero_cross_now()), but that hung forever during the
+ * open-loop align delay in real testing (TIM2 apparently not counting -
+ * root cause not yet found, TIM2 had never actually been exercised
+ * before this). zero_cross_now()/TIM2 stay initialized for later BEMF
+ * period measurement (closed-loop only, not used by the open-loop path
+ * at all), but are no longer load-bearing here. */
+#define US_LOOP_COUNT 17UL /* ~APPROX_MS_LOOP_COUNT/1000 at ~168MHz, see main.c */
+
 static void delay_us(uint32_t us)
 {
-    uint32_t start = zero_cross_now();
-    while ((zero_cross_now() - start) < us) {
+    for (volatile uint32_t i = 0; i < us * US_LOOP_COUNT; i++) {
     }
 }
 
