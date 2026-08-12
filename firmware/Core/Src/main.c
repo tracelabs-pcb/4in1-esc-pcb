@@ -47,7 +47,8 @@
 #define RAMP_END_STEP_US   3000UL                          /* 3 ms/step at ramp end */
 #define RAMP_STEPS         120UL                           /* 20 electrical revolutions */
 #define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 25U) / 100U) /* 25% */
-#define CRUISE_STEP_US     3000UL                          /* matches RAMP_END_STEP_US for a smooth handover */
+#define CRUISE_STEP_MS     3UL  /* matches RAMP_END_STEP_US for a smooth handover; polled, see the cruise loop */
+#define LED_HALF_PERIOD_MS 81UL /* ~80ms, rounded up to a CRUISE_STEP_MS multiple so the division below is exact */
 
 static void led_init(void)
 {
@@ -269,23 +270,38 @@ int main(void)
         delay_approx_ms(250);
     }
 
-    /* Blocking for ~2s (align + ramp), then returns with the motor
-     * cruising forever via TIM3_IRQHandler - see commutation.h. Purely
-     * open-loop, no BEMF/comparators involved (commutation_handoff_to_closed_loop()
+    /* Blocking for ~2s (align + ramp), then returns with the cruise duty
+     * applied at whatever step the ramp ended on. Purely open-loop, no
+     * BEMF/comparators involved (commutation_handoff_to_closed_loop()
      * is intentionally not called here - verify smooth open-loop spin
      * first, see firmware/README.md). */
     commutation_open_loop_start(ALIGN_DUTY_TICKS, ALIGN_TIME_US,
                                  RAMP_START_STEP_US, RAMP_END_STEP_US, RAMP_STEPS,
-                                 RUN_DUTY_TICKS, CRUISE_STEP_US);
+                                 RUN_DUTY_TICKS);
 
-    /* Cruising now. Keep watching FAULT_ST forever - any real fault
-     * (e.g. overcurrent) needs an immediate stop, not just a one-off
-     * check like the earlier bring-up steps had. */
+    /* Cruise stepping is polled from here, NOT driven by the TIM3
+     * interrupt: real hardware testing hit a HardFault (CFSR=NOCP, with
+     * a garbage PC/LR that didn't correspond to any real coprocessor
+     * instruction anywhere in the build - see the long comment in
+     * commutation_open_loop_start()) shortly after the first TIM3 IRQ
+     * fired. Root cause not found yet. Advancing the step directly from
+     * this polled loop sidesteps the interrupt entirely for open-loop -
+     * the LED blink interval doubles as the step clock, subdivided into
+     * CRUISE_STEP_MS chunks so steps happen at roughly the intended
+     * rate. Also keeps watching FAULT_ST - any real fault (e.g.
+     * overcurrent) needs an immediate stop, not just a one-off check
+     * like the earlier bring-up steps had. */
     for (;;) {
         led_green_on();
-        delay_approx_ms(80);
+        for (uint32_t i = 0; i < LED_HALF_PERIOD_MS / CRUISE_STEP_MS; i++) {
+            commutation_step_advance();
+            delay_approx_ms(CRUISE_STEP_MS);
+        }
         led_off_hiz();
-        delay_approx_ms(80);
+        for (uint32_t i = 0; i < LED_HALF_PERIOD_MS / CRUISE_STEP_MS; i++) {
+            commutation_step_advance();
+            delay_approx_ms(CRUISE_STEP_MS);
+        }
 
         g_debug_erpm = commutation_get_erpm();
         g_debug_fault_st_running = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);

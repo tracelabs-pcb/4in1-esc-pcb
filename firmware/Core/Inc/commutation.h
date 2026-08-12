@@ -54,13 +54,31 @@ void commutation_init(void);
  * here; this is the raw actuator entry point. */
 void commutation_set_duty(uint32_t duty_ticks);
 
+/* Advances to the next of the six commutation steps and applies it
+ * (same effect as one TIM3_IRQHandler firing, minus the interrupt).
+ * Call this from a plain polled loop at roughly cruise_step_us
+ * intervals to run the motor without relying on the TIM3 interrupt at
+ * all - see the comment on commutation_open_loop_start() below for
+ * why this exists as a separate, explicitly-callable step. */
+void commutation_step_advance(void);
+
 /*
  * Blocking open-loop start-up: align the rotor to a known step, then
  * ramp through commutation steps at a fixed, MCU-timed rate (no BEMF
  * involved at all), accelerating from a slow start rate to a cruise
- * rate, then keeps commutating forever at that cruise rate via TIM3
- * (non-blocking after this call returns - main() is free to do other
- * things, e.g. poll commutation_get_erpm()).
+ * rate. Returns with the cruise duty applied at whatever step the
+ * ramp ended on - the caller is responsible for continuing to advance
+ * steps from there (see commutation_step_advance() above), typically
+ * from a polled loop at roughly the same rate as ramp_end_step_us.
+ *
+ * This intentionally does NOT arm TIM3 to keep cruising by itself
+ * anymore (an earlier version did) - real hardware testing hit a
+ * HardFault (CFSR=NOCP, garbage PC/LR not matching any real
+ * coprocessor instruction in the build) shortly after the first TIM3
+ * IRQ fired, root cause not yet found. Polling from the caller
+ * sidesteps that for open-loop; TIM3/EXTI are still set up in
+ * commutation_init() for whenever the interrupt-driven path (needed
+ * for real closed-loop BEMF timing) gets debugged.
  *
  * This does NOT depend on the LM2901 comparator wiring/mapping being
  * correct - it's the simplest way to get the motor to actually turn
@@ -72,8 +90,7 @@ void commutation_set_duty(uint32_t duty_ticks);
  * position before ramping. ramp_start_step_us/ramp_end_step_us: time
  * per commutation step at the start/end of the ramp (start slow, end
  * fast) - ramp_steps steps are taken, linearly interpolating between
- * them. cruise_step_us: the fixed step time held forever after the
- * ramp (should normally equal ramp_end_step_us for a smooth handover).
+ * them.
  *
  * These are motor/prop/voltage-dependent and the defaults used in
  * main.c are only a conservative starting guess - see firmware/README.md
@@ -85,8 +102,7 @@ void commutation_open_loop_start(uint32_t align_duty_ticks,
                                   uint32_t ramp_start_step_us,
                                   uint32_t ramp_end_step_us,
                                   uint32_t ramp_steps,
-                                  uint32_t run_duty_ticks,
-                                  uint32_t cruise_step_us);
+                                  uint32_t run_duty_ticks);
 
 /* Switches from the open-loop cruise (see above) to closed-loop
  * BEMF/EXTI-driven commutation. Only call this after

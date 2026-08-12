@@ -128,13 +128,18 @@ void commutation_set_duty(uint32_t duty_ticks)
     apply_step(s_step); /* re-apply so the active channel picks up the new duty immediately */
 }
 
+void commutation_step_advance(void)
+{
+    s_step = (uint8_t) ((s_step + 1) % 6);
+    apply_step(s_step);
+}
+
 void commutation_open_loop_start(uint32_t align_duty_ticks,
                                   uint32_t align_time_us,
                                   uint32_t ramp_start_step_us,
                                   uint32_t ramp_end_step_us,
                                   uint32_t ramp_steps,
-                                  uint32_t run_duty_ticks,
-                                  uint32_t cruise_step_us)
+                                  uint32_t run_duty_ticks)
 {
     s_mode = COMMUTATION_MODE_OPEN_LOOP;
 
@@ -162,15 +167,23 @@ void commutation_open_loop_start(uint32_t align_duty_ticks,
         delay_us(step_us);
     }
 
-    /* Cruise: keep commutating forever at a fixed rate via TIM3, driven
-     * from TIM3_IRQHandler (re-arms itself while s_mode is open loop). */
+    /* Ramp done: apply the cruise duty at whatever step the ramp ended
+     * on, then return. Cruise stepping itself is NOT driven from here
+     * (no TIM3 IRQ armed) - see commutation_step_advance() and the
+     * caller (main.c's cruise loop), which calls it from a plain
+     * polled loop instead. This was originally TIM3-interrupt-driven,
+     * but real hardware testing hit a HardFault (NOCP, with a garbage
+     * PC/LR pointing nowhere sensible - not a real coprocessor
+     * instruction anywhere in the build) shortly after the first TIM3
+     * IRQ fired, root cause not yet found. Polling from main() sidesteps
+     * that entirely for open-loop; TIM3/EXTI still get set up in
+     * commutation_init() for whenever the interrupt-driven path (needed
+     * for real closed-loop BEMF timing) gets debugged. */
     g_debug_ramp_i = ramp_steps; /* ramp completed fully */
-    g_debug_checkpoint = 900;    /* about to arm TIM3 for cruise */
+    g_debug_checkpoint = 900;    /* ramp done, cruise duty about to apply */
     s_duty_ticks = run_duty_ticks;
     apply_step(s_step);
-    s_open_loop_step_ticks = cruise_step_us; /* TIM3 tick == 1us, see commutation_init() */
-    tim3_schedule_delay(s_open_loop_step_ticks);
-    g_debug_checkpoint = 901; /* TIM3 armed, commutation_open_loop_start() about to return */
+    g_debug_checkpoint = 901; /* commutation_open_loop_start() about to return */
 }
 
 void commutation_handoff_to_closed_loop(void)
@@ -243,8 +256,7 @@ void TIM3_IRQHandler(void)
 {
     TIM3->SR = 0;
     g_debug_tim3_count++;
-    s_step = (uint8_t) ((s_step + 1) % 6);
-    apply_step(s_step);
+    commutation_step_advance();
 
     if (s_mode == COMMUTATION_MODE_OPEN_LOOP) {
         tim3_schedule_delay(s_open_loop_step_ticks); /* keep cruising at a fixed rate */
