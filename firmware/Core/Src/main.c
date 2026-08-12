@@ -115,15 +115,50 @@ volatile uint32_t g_debug_fault_cfsr = 0;
 volatile uint32_t g_debug_fault_hfsr = 0;
 volatile uint32_t g_debug_fault_mmfar = 0;
 volatile uint32_t g_debug_fault_bfar = 0;
+/* Confirmed by real hardware testing: CFSR came back as NOCP (bit 19,
+ * "no coprocessor") with HFSR FORCED - but arm-none-eabi-objdump shows
+ * zero VFP/coprocessor instructions anywhere in the final .elf. That
+ * combination (a real NOCP fault with no real coprocessor instruction
+ * in the compiled code at all) points at a wild jump: the CPU executed
+ * from a corrupted/unintended address whose bytes happened to decode
+ * as a coprocessor opcode - not an actual intentional FPU use. Capture
+ * the exact faulting PC (and LR/EXC_RETURN) from the exception stack
+ * frame to find out exactly where. */
+volatile uint32_t g_debug_fault_pc = 0;
+volatile uint32_t g_debug_fault_lr = 0;
 
-void HardFault_Handler(void)
+/* used: only ever called from HardFault_Handler's inline asm below,
+ * which GCC's own dead-code analysis can't see - without this it gets
+ * silently dropped (just a "defined but not used" warning at compile
+ * time, but an undefined-reference link error once the linker actually
+ * tries to resolve the inline asm's branch target). */
+__attribute__((used)) static void hard_fault_diagnose(uint32_t *stack_frame)
 {
+    /* Hardware-stacked exception frame layout: r0,r1,r2,r3,r12,LR,PC,xPSR. */
+    g_debug_fault_lr = stack_frame[5];
+    g_debug_fault_pc = stack_frame[6];
     g_debug_fault_cfsr = SCB->CFSR;
     g_debug_fault_hfsr = SCB->HFSR;
     g_debug_fault_mmfar = SCB->MMFAR;
     g_debug_fault_bfar = SCB->BFAR;
     gpio_en_drv_set(0); /* stop driving the motor immediately */
-    fail_forever();     /* see g_debug_fault_cfsr/hfsr/mmfar/bfar */
+    fail_forever();     /* see g_debug_fault_pc and friends */
+}
+
+/* Naked: must read SP before any C prologue touches it, to recover the
+ * hardware-pushed exception frame untouched. EXC_RETURN bit 2 (in LR
+ * at fault entry) tells us whether MSP or PSP was in use - this
+ * project only ever uses MSP (no RTOS/PSP switch), so this always
+ * resolves to MSP in practice, but checking it properly costs nothing. */
+__attribute__((naked)) void HardFault_Handler(void)
+{
+    __asm volatile(
+        "tst lr, #4        \n"
+        "ite eq            \n"
+        "mrseq r0, msp     \n"
+        "mrsne r0, psp     \n"
+        "b hard_fault_diagnose \n"
+    );
 }
 
 int main(void)
