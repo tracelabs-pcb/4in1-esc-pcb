@@ -2,39 +2,52 @@
 #include "gpio_config.h"
 #include "edl7141_spi.h"
 #include "pwm_tim1.h"
+#include "commutation.h"
 #include "stm32f405_regs.h"
 
 /*
- * Minimal bring-up step 4: initialize TIM1/PWM (PA8/9/10 -> INHC/B/A)
- * with all three channels held at 0% duty, then re-check FAULT_ST.
+ * Phase-A-only bring-up (SPI/EN_DRV/fault checks, single test pulse)
+ * passed - see HANDOFF history. This is the next stage: an actual
+ * open-loop spin-up with the motor connected, using the six-step
+ * commutation module (commutation.c/.h) that was written earlier but
+ * never wired up. No BEMF/comparators involved yet - commutation is
+ * driven purely by fixed MCU timing (align, then a timed ramp, then a
+ * fixed cruise rate), so it does not depend on the still-unverified
+ * comparator-to-phase mapping. See firmware/README.md, section
+ * "Open-Loop-Start", for the full rationale and tuning guidance.
  *
- * Still safe: at 0% duty, INHx=0 on all channels, and with INLx
- * hardwired to GND in 6PWM mode that means GHx=LOW/GLx=LOW/SHx=High-Z
- * on all three phases (see the long comment in edl7141_spi.h) - no
- * MOSFET gets driven at all. This step only tests that TIM1 itself
- * starts cleanly and doesn't provoke a new fault (e.g. extra load on
- * the buck regulator), not that anything moves.
+ * SAFETY before flashing this with a motor attached:
+ *   - Propeller OFF for the first test. Free-spinning shaft only.
+ *   - Bench PSU current limit set sanely, hand near the power switch.
+ *   - Motor free to move (not clamped somewhere that fights the shaft).
  *
- * Step 5: apply 5% duty on phase A (PWM_CH_INHA) only, for ~3 seconds,
- * so the first real switching event can be watched on a scope
- * (GHA-SHA, SHA-GND, PA10 as trigger reference, GLA-GND as the real
- * shoot-through check). Repeats forever (slow "get ready" blink, then
- * the test pulse, then re-check faults, then repeat) so there's no
- * need to race a one-shot window with the scope - arm the trigger any
- * time during the slow blink, the next test pulse is always coming.
- *
- * LED convention (PC13), building up step by step:
- *   solid red        -> a check failed, stopped here, do not proceed
- *   blinking green   -> step 3 (EN_DRV + fault check) passed
- *   4x green blinks  -> step 4 (TIM1 PWM init @ 0% duty + fault check) passed
- *   slow green blink -> step 5: "get ready" window (~6s) - arm the
- *                        scope trigger now, the test pulse is coming
- *   fast green blink -> step 5 test pulse actively running (~3s)
- *   (repeats: slow blink, fast blink, slow blink, ... forever, unless
- *   a fault shows up, then solid red)
+ * LED convention (PC13), continuing the numbering from the earlier
+ * bring-up stages:
+ *   solid red        -> a check failed / a fault tripped mid-run,
+ *                        stopped here (EN_DRV forced back low)
+ *   blinking green   -> steps 1-2 (SPI read/write) passed
+ *   4x green blinks  -> step 3 (EN_DRV + fault check) passed
+ *   brief solid green -> step 4 (commutation_init() + fault check) passed
+ *   slow green blink (~3s) -> "get ready" window before the motor moves
+ *   fast green blink -> open-loop align+ramp+cruise is running
+ *   (once cruising starts it keeps running forever, fast-blinking,
+ *   until a fault is detected - then solid red, EN_DRV disabled)
  */
 
 #define APPROX_MS_LOOP_COUNT 16800U /* crude, uncalibrated busy-wait unit at ~168MHz */
+
+/* Open-loop start parameters - conservative starting guesses, not
+ * values calculated for this specific motor/propeller. See
+ * firmware/README.md "Open-Loop-Start" for what to tune if the motor
+ * doesn't move, judders instead of ramping smoothly, or ends up too
+ * slow/weak. */
+#define ALIGN_DUTY_TICKS   ((PWM_ARR_TICKS * 15U) / 100U) /* 15% */
+#define ALIGN_TIME_US      500000UL                        /* 500 ms */
+#define RAMP_START_STEP_US 20000UL                         /* 20 ms/step at ramp start */
+#define RAMP_END_STEP_US   3000UL                          /* 3 ms/step at ramp end */
+#define RAMP_STEPS         120UL                           /* 20 electrical revolutions */
+#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 25U) / 100U) /* 25% */
+#define CRUISE_STEP_US     3000UL                          /* matches RAMP_END_STEP_US for a smooth handover */
 
 static void led_init(void)
 {
@@ -78,10 +91,10 @@ static void delay_approx_ms(uint32_t ms)
  *                                    that actually decides pass/fail) */
 volatile uint16_t g_debug_fault_st_before_clear = 0xFFFFU;
 volatile uint16_t g_debug_fault_st = 0xFFFFU;
-volatile uint16_t g_debug_fault_st_after_pwm_init = 0xFFFFU; /* step 4 */
-volatile uint16_t g_debug_fault_st_after_step5 = 0xFFFFU;    /* step 5 */
-volatile uint16_t g_debug_supply_st = 0xFFFFU; /* live UVLO/OVLO status, see edl7141_spi.h */
+volatile uint16_t g_debug_fault_st_after_pwm_init = 0xFFFFU; /* step 4 (commutation_init()) */
+volatile uint16_t g_debug_fault_st_running = 0xFFFFU;        /* polled continuously once cruising */
 volatile uint16_t g_debug_pwm_cfg_readback = 0xFFFFU; /* confirms PWM_MODE really is 6PWM (0x0000) */
+volatile float    g_debug_erpm = 0.0f; /* stays 0 in open-loop mode - EXTI edges are ignored until commutation_handoff_to_closed_loop() */
 
 static void fail_forever(void)
 {
@@ -163,10 +176,13 @@ int main(void)
         delay_approx_ms(300);
     }
 
-    /* Step 4: TIM1 PWM init, all channels at 0% duty (see the comment
-     * at the top of this file for why that's still safe), then
-     * re-check for any newly provoked fault. */
-    pwm_tim1_init();
+    /* Step 4: bring up TIM1 (PWM), TIM2 (1 MHz timestamp), TIM3 (commutation
+     * delay) and EXTI6/7/8 (comparator inputs, left masked - see
+     * zero_cross_exti_init()). All channels sit at 0% duty right after
+     * this (commutation_init() applies step 0 with s_duty_ticks==0), so
+     * this is still safe in the same sense the old step 4 was - no
+     * MOSFET gets driven yet. Re-check for any newly provoked fault. */
+    commutation_init();
     delay_approx_ms(20);
 
     g_debug_fault_st_after_pwm_init = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
@@ -175,45 +191,43 @@ int main(void)
         fail_forever(); /* step 4 failed - see g_debug_fault_st_after_pwm_init */
     }
 
-    /* Step 4 passed: brief solid green, then move on to step 5. */
+    /* Step 4 passed: brief solid green. */
     led_green_on();
     delay_approx_ms(1000);
     led_off_hiz();
     delay_approx_ms(300);
 
-    /* Step 5, repeating forever: ~6s slow "get ready" blink (arm the
-     * scope trigger any time in this window), then 5% duty on phase A
-     * only (~420/8399 ticks) for ~3s with fast blink, then back to 0%
-     * and a fault re-check before looping around again. INHB/INHC stay
-     * at 0% throughout. */
+    /* ~3s slow "get ready" blink before the motor actually moves. */
+    for (int i = 0; i < 6; i++) {
+        led_green_on();
+        delay_approx_ms(250);
+        led_off_hiz();
+        delay_approx_ms(250);
+    }
+
+    /* Blocking for ~2s (align + ramp), then returns with the motor
+     * cruising forever via TIM3_IRQHandler - see commutation.h. Purely
+     * open-loop, no BEMF/comparators involved (commutation_handoff_to_closed_loop()
+     * is intentionally not called here - verify smooth open-loop spin
+     * first, see firmware/README.md). */
+    commutation_open_loop_start(ALIGN_DUTY_TICKS, ALIGN_TIME_US,
+                                 RAMP_START_STEP_US, RAMP_END_STEP_US, RAMP_STEPS,
+                                 RUN_DUTY_TICKS, CRUISE_STEP_US);
+
+    /* Cruising now. Keep watching FAULT_ST forever - any real fault
+     * (e.g. overcurrent) needs an immediate stop, not just a one-off
+     * check like the earlier bring-up steps had. */
     for (;;) {
-        for (int i = 0; i < 6; i++) {
-            led_green_on();
-            delay_approx_ms(500);
-            led_off_hiz();
-            delay_approx_ms(500);
-        }
+        led_green_on();
+        delay_approx_ms(80);
+        led_off_hiz();
+        delay_approx_ms(80);
 
-        pwm_tim1_set_duty(PWM_CH_INHA, (PWM_ARR_TICKS * 5U) / 100U);
-        for (int i = 0; i < 30; i++) {
-            /* Live UVLO/OVLO status while the pulse is actually running -
-             * VCCLS/VCCHS UVLO forces Hi-Z outputs independently of
-             * FAULT_ST/EN_DRV/nBRAKE, so this is worth catching mid-pulse
-             * rather than only afterward. See edl7141_spi.h. */
-            g_debug_supply_st = edl7141_read_reg(EDL7141_ADDR_SUPPLY_ST);
-            g_debug_pwm_cfg_readback = edl7141_read_reg(EDL7141_ADDR_PWM_CFG);
-            led_green_on();
-            delay_approx_ms(50);
-            led_off_hiz();
-            delay_approx_ms(50);
-        }
-        pwm_tim1_set_duty(PWM_CH_INHA, 0); /* back to 0% - phase A floats again */
-        delay_approx_ms(20);
-
-        g_debug_fault_st_after_step5 = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
-        if (g_debug_fault_st_after_step5 != 0x0000U) {
-            gpio_en_drv_set(0);
-            fail_forever(); /* step 5 failed - see g_debug_fault_st_after_step5 */
+        g_debug_erpm = commutation_get_erpm();
+        g_debug_fault_st_running = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
+        if (g_debug_fault_st_running != 0x0000U) {
+            gpio_en_drv_set(0); /* cut all phase drive immediately */
+            fail_forever(); /* fault while running - see g_debug_fault_st_running */
         }
     }
 }
