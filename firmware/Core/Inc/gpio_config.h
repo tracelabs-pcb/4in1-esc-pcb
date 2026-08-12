@@ -22,6 +22,15 @@
  *                              confirmed CE is hardwired high via pull-up,
  *                              so power-supply start-up needs no MCU
  *                              action, only EN_DRV/gate-driver stage does)
+ *
+ *   PC1  (GPIO output)     -> 6EDL7141 VSENSE/nBRAKE (bodged in addition
+ *                              to the board's existing pull-down resistor,
+ *                              no series diode - see the long comment in
+ *                              gpio_config.c). Idle LOW at boot (brake
+ *                              asserted, harmless before EN_DRV); release
+ *                              with gpio_nbrake_release() once ready for
+ *                              normal PWM operation. INHx is silently
+ *                              ignored by the driver while this is low.
  */
 void gpio_config_init(void);
 
@@ -30,5 +39,13 @@ void gpio_config_init(void);
  * edl7141_configure_pwm_mode()), since PWM_MODE only latches while
  * EN_DRV is low (datasheet Table 20, "Standby" programmability). */
 void gpio_en_drv_set(int enable);
+
+/* Drives PC1 (VSENSE/nBRAKE) high, releasing the brake so INHx PWM
+ * signals actually reach the driver outputs. See the long comment in
+ * gpio_config.c for why this is safe without a series diode on this
+ * board (CE hardwired high, PC1 stays a floating input - hardware
+ * default - until this is called well after the driver's own startup
+ * analog-sensing window has passed). */
+void gpio_nbrake_release(void);
 
 #endif /* GPIO_CONFIG_H */

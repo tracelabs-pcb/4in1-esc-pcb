@@ -31,7 +31,7 @@ static void gpio_set_pupd_none(GPIO_TypeDef *port, uint32_t pin)
 
 void gpio_config_init(void)
 {
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
     /* PA8/PA9/PA10 -> TIM1_CH1/CH2/CH3, alternate function push-pull. */
@@ -73,9 +73,34 @@ void gpio_config_init(void)
     gpio_set_mode(GPIOB, 2, GPIO_MODE_OUTPUT);
     gpio_set_pupd_none(GPIOB, 2);
     GPIOB->BSRR = (1UL << (2 + 16)); /* EN_DRV = 0 */
+
+    /*
+     * PC1 -> 6EDL7141 VSENSE/nBRAKE, bodge wire added in addition to the
+     * board's existing RSENSE pull-down resistor (no series diode).
+     *
+     * Why no diode is safe here: the driver only reads the RSENSE
+     * resistor as an analog value during a short (~25us) window right
+     * at its own power-on (to pick DVDD 3.3V/5V). CE is hardwired high,
+     * so that window only ever happens once, at shared board power-on,
+     * and STM32 GPIOs default to floating input (Hi-Z) until firmware
+     * configures them - by the time this line runs (after clock init
+     * etc.), that window is long over regardless of exact MCU-vs-driver
+     * power-up race. Driving PC1 LOW here changes nothing (matches what
+     * the existing pull-down resistor already does); only
+     * gpio_nbrake_release() driving it HIGH actually matters, and that's
+     * called explicitly, much later, well after this window.
+     */
+    gpio_set_mode(GPIOC, 1, GPIO_MODE_OUTPUT);
+    gpio_set_pupd_none(GPIOC, 1);
+    GPIOC->BSRR = (1UL << (1 + 16)); /* nBRAKE = 0 (asserted, matches the board's pull-down) */
 }
 
 void gpio_en_drv_set(int enable)
 {
     GPIOB->BSRR = enable ? (1UL << 2) : (1UL << (2 + 16));
+}
+
+void gpio_nbrake_release(void)
+{
+    GPIOC->BSRR = (1UL << 1); /* nBRAKE = 1 (released, normal PWM operation) */
 }

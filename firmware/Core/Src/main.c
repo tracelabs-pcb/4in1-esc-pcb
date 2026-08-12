@@ -119,6 +119,15 @@ int main(void)
     gpio_en_drv_set(1);
     delay_approx_ms(20); /* let charge pumps/output stage settle before checking for faults */
 
+    /* Release VSENSE/nBRAKE (PC1, bodge wire): the board's existing
+     * pull-down resistor holds this low forever otherwise, which the
+     * driver reads as a permanently asserted brake and silently ignores
+     * all INHx PWM commands. See gpio_config.c for why this is safe
+     * without a series diode. Must happen well after the driver's own
+     * startup analog-sensing window - by this point (after clock init,
+     * SPI checks, EN_DRV settle delay) it long since has. */
+    gpio_nbrake_release();
+
     /* FAULT_ST bits stay set once tripped until explicitly cleared,
      * even after the triggering condition is gone (e.g. a one-off
      * startup transient). Record the raw pre-clear value for
