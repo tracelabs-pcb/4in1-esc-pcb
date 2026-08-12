@@ -15,30 +15,23 @@
  * starts cleanly and doesn't provoke a new fault (e.g. extra load on
  * the buck regulator), not that anything moves.
  *
- * Step 5: apply 5% duty on one phase at a time, alternating A and B
- * each cycle, ~3 seconds each, so the first real switching event can
- * be watched on a scope (GHx-SHx, SHx-GND, PA9/PA10 as trigger
- * reference, GLx-GND as the real shoot-through check). Repeats forever
- * (phase-ID blinks, then a slow "get ready" blink, then the test
- * pulse, then re-check faults, then the other phase) so there's no
+ * Step 5: apply 5% duty on phase A (PWM_CH_INHA) only, for ~3 seconds,
+ * so the first real switching event can be watched on a scope
+ * (GHA-SHA, SHA-GND, PA10 as trigger reference, GLA-GND as the real
+ * shoot-through check). Repeats forever (slow "get ready" blink, then
+ * the test pulse, then re-check faults, then repeat) so there's no
  * need to race a one-shot window with the scope - arm the trigger any
  * time during the slow blink, the next test pulse is always coming.
- * Alternating instead of only phase B lets GHA be re-measured (at the
- * driver pin and at the MOSFET gate, see the handoff doc) without a
- * reflash, right after watching a known-good GHB pulse for comparison.
  *
  * LED convention (PC13), building up step by step:
  *   solid red        -> a check failed, stopped here, do not proceed
  *   blinking green   -> step 3 (EN_DRV + fault check) passed
  *   4x green blinks  -> step 4 (TIM1 PWM init @ 0% duty + fault check) passed
- *   1 short blink + pause  -> step 5: phase A is up next
- *   2 short blinks + pause -> step 5: phase B is up next
  *   slow green blink -> step 5: "get ready" window (~6s) - arm the
  *                        scope trigger now, the test pulse is coming
  *   fast green blink -> step 5 test pulse actively running (~3s)
- *   (repeats: phase-ID blinks, slow blink, fast blink, phase-ID blinks
- *   for the other phase, ... forever, unless a fault shows up, then
- *   solid red)
+ *   (repeats: slow blink, fast blink, slow blink, ... forever, unless
+ *   a fault shows up, then solid red)
  */
 
 #define APPROX_MS_LOOP_COUNT 16800U /* crude, uncalibrated busy-wait unit at ~168MHz */
@@ -188,33 +181,12 @@ int main(void)
     led_off_hiz();
     delay_approx_ms(300);
 
-    /* Step 5, repeating forever, alternating phase A then phase B each
-     * cycle: a phase-ID blink (1 blink = A, 2 blinks = B) so the LED
-     * alone tells you which phase is up without needing to already be
-     * watching, then ~6s slow "get ready" blink (arm the scope trigger
-     * any time in this window), then 5% duty on that phase only
-     * (~420/8399 ticks) for ~3s with fast blink, then back to 0% and a
-     * fault re-check before moving to the other phase. The channel not
-     * under test stays at 0% duty throughout (INHC is never driven in
-     * this step). */
-    static const pwm_channel_t step5_channels[2] = { PWM_CH_INHA, PWM_CH_INHB };
-    static const int step5_blink_counts[2] = { 1, 2 };
-    int phase_idx = 0;
-
+    /* Step 5, repeating forever: ~6s slow "get ready" blink (arm the
+     * scope trigger any time in this window), then 5% duty on phase A
+     * only (~420/8399 ticks) for ~3s with fast blink, then back to 0%
+     * and a fault re-check before looping around again. INHB/INHC stay
+     * at 0% throughout. */
     for (;;) {
-        pwm_channel_t ch = step5_channels[phase_idx];
-        int blinks = step5_blink_counts[phase_idx];
-
-        /* Phase-ID blinks: quick on/off, distinct from both the slow
-         * "get ready" blink and the fast test-pulse blink below. */
-        for (int i = 0; i < blinks; i++) {
-            led_green_on();
-            delay_approx_ms(150);
-            led_off_hiz();
-            delay_approx_ms(150);
-        }
-        delay_approx_ms(700); /* pause so the blink count is easy to read */
-
         for (int i = 0; i < 6; i++) {
             led_green_on();
             delay_approx_ms(500);
@@ -222,7 +194,7 @@ int main(void)
             delay_approx_ms(500);
         }
 
-        pwm_tim1_set_duty(ch, (PWM_ARR_TICKS * 5U) / 100U);
+        pwm_tim1_set_duty(PWM_CH_INHA, (PWM_ARR_TICKS * 5U) / 100U);
         for (int i = 0; i < 30; i++) {
             /* Live UVLO/OVLO status while the pulse is actually running -
              * VCCLS/VCCHS UVLO forces Hi-Z outputs independently of
@@ -235,7 +207,7 @@ int main(void)
             led_off_hiz();
             delay_approx_ms(50);
         }
-        pwm_tim1_set_duty(ch, 0); /* back to 0% - this phase floats again */
+        pwm_tim1_set_duty(PWM_CH_INHA, 0); /* back to 0% - phase A floats again */
         delay_approx_ms(20);
 
         g_debug_fault_st_after_step5 = edl7141_read_reg(EDL7141_ADDR_FAULT_ST);
@@ -243,7 +215,5 @@ int main(void)
             gpio_en_drv_set(0);
             fail_forever(); /* step 5 failed - see g_debug_fault_st_after_step5 */
         }
-
-        phase_idx = 1 - phase_idx; /* alternate: A, B, A, B, ... */
     }
 }
