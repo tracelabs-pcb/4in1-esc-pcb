@@ -40,13 +40,25 @@
  * values calculated for this specific motor/propeller. See
  * firmware/README.md "Open-Loop-Start" for what to tune if the motor
  * doesn't move, judders instead of ramping smoothly, or ends up too
- * slow/weak. */
-#define ALIGN_DUTY_TICKS   ((PWM_ARR_TICKS * 15U) / 100U) /* 15% */
+ * slow/weak.
+ *
+ * Duty bumped up from the original 15%/25% for a diagnostic test: at
+ * the original values, real hardware testing showed literally zero
+ * measurable current increase over the driver's idle draw and zero
+ * physical response from the motor. Suspected cause: this board's
+ * INLx is hardwired to GND (see gpio_config.h), so the low side can
+ * never be actively switched - return current only ever flows
+ * passively through a low-side FET's body diode (~0.7V drop), which
+ * may simply never build up meaningful winding current at low duty
+ * and short pulse widths. Higher duty is a quick, low-risk way to
+ * tell "too weak to move" (current/response scales up with duty) apart
+ * from "something else entirely wrong" (nothing changes even here). */
+#define ALIGN_DUTY_TICKS   ((PWM_ARR_TICKS * 40U) / 100U) /* 40% */
 #define ALIGN_TIME_US      500000UL                        /* 500 ms */
 #define RAMP_START_STEP_US 20000UL                         /* 20 ms/step at ramp start */
 #define RAMP_END_STEP_US   3000UL                          /* 3 ms/step at ramp end */
 #define RAMP_STEPS         120UL                           /* 20 electrical revolutions */
-#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 25U) / 100U) /* 25% */
+#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 70U) / 100U) /* 70% */
 #define CRUISE_STEP_MS     3UL  /* matches RAMP_END_STEP_US for a smooth handover; polled, see the cruise loop */
 #define LED_HALF_PERIOD_MS 81UL /* ~80ms, rounded up to a CRUISE_STEP_MS multiple so the division below is exact */
 
