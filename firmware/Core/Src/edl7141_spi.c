@@ -61,11 +61,10 @@ int edl7141_check_device_id(void)
 
 void edl7141_configure_pwm_mode(void)
 {
-    /* See the long comment in edl7141_spi.h: this MUST stay 6PWM
-     * (0x0000) for the floating-phase BEMF sensing to work with INLx
-     * grounded. Do not change this to EDL7141_PWM_MODE_3PWM-style
-     * values. */
-    edl7141_write_reg(EDL7141_ADDR_PWM_CFG, EDL7141_PWM_MODE_6PWM);
+    /* See the long comment in edl7141_spi.h: 3PWM, not 6PWM, for now -
+     * temporary while verifying open-loop spin (no BEMF sensing
+     * involved yet). Revisit before closed-loop testing. */
+    edl7141_write_reg(EDL7141_ADDR_PWM_CFG, EDL7141_PWM_MODE_3PWM);
 }
 
 void edl7141_disable_unused_current_sense(void)

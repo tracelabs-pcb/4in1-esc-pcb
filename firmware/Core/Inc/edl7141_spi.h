@@ -50,8 +50,10 @@
  * gone. Write both bits to clear everything regardless of latch type. */
 #define EDL7141_FAULTS_CLR_ALL      0x0003U
 
-/* PWM_CFG (0x13) reset value 0x0000 = PWM_MODE b000 = 6PWM mode. */
+/* PWM_CFG (0x13) reset value 0x0000 = PWM_MODE b000 = 6PWM mode.
+ * PWM_MODE occupies bits[2:0]; b001 = 3PWM mode. */
 #define EDL7141_PWM_MODE_6PWM       0x0000U
+#define EDL7141_PWM_MODE_3PWM       0x0001U
 
 /* CSAMP_CFG (0x1D) reset value 0x0028 = CS_GAIN_ANA=1, CS_EN=b010 (only
  * phase B's current-sense amplifier enabled - an odd reset default,
@@ -81,28 +83,41 @@ uint16_t edl7141_read_reg(uint8_t addr7);
 int edl7141_check_device_id(void);
 
 /*
- * Explicitly writes PWM_CFG = 6PWM mode (PWM_MODE = b000).
+ * Explicitly writes PWM_CFG = 3PWM mode (PWM_MODE = b001).
  *
- * This is deliberately 6PWM, not 3PWM, and this is not optional for
- * this board: with INLx hard-wired to GND (per the schematic), 3PWM
- * mode's truth table (datasheet Table 9) ties GLx HIGH whenever INHx
- * is low - i.e. the "off" phase would have its low-side FET driven ON
- * continuously instead of floating, which pulls the phase node to GND
- * and destroys the back-EMF zero-cross reading on the LM2901 comparator.
- * In 6PWM mode (datasheet Table 8), with INLx=0, INHx=0 correctly
- * produces GHx=LOW/GLx=LOW/SHx=High-Z - a genuinely floating phase,
- * which is what the external comparator + VSTAR network needs. 6PWM is
- * also the register's power-on-reset default (PWM_CFG resets to
- * 0x0000), so this call is a safety-net / explicit statement of intent
- * rather than a functional necessity on an unprogrammed part - but do
- * not "simplify" it away, and do not switch this board to 3PWM mode.
+ * TEMPORARY, for open-loop bring-up only - see the long history in
+ * this project's git log/HANDOFF notes. This board hardwires INLx to
+ * GND, which was originally chosen so 6PWM mode's independent INHx/
+ * INLx evaluation (datasheet Table 8) gives a genuinely floating
+ * "off" phase (GHx=LOW/GLx=LOW/SHx=High-Z) for the LM2901 comparator
+ * BEMF sensing. But 6PWM also means the driver provides ZERO
+ * automatic complementary/dead-time switching - the MCU is expected
+ * to drive INLx itself (see datasheet Figure 63, Infineon's own 6PWM
+ * sensorless reference schematic, which drives all 6 lines from the
+ * MCU). With INLx hardwired instead of MCU-driven, 6PWM mode can
+ * NEVER establish real current through the motor: driving one phase's
+ * high side alone gives the other two phases no return path at all
+ * (their low-side body diodes only conduct the other direction) -
+ * confirmed by real hardware testing (zero current draw increase with
+ * a motor attached vs. not, at any duty).
+ *
+ * 3PWM mode ignores INLx entirely (datasheet Table 9: "INLx signals
+ * are ignored in this mode") and has the driver generate low-side
+ * switching itself with dead time - so it works with this board's
+ * fixed wiring and produces real torque-capable current, with no
+ * hardware changes needed. The cost: the "off" phase's GLx goes HIGH
+ * whenever INHx is low (Table 9), actively pulling that phase to GND
+ * instead of floating - this destroys the comparator BEMF zero-cross
+ * reading. Fine for verifying open-loop spin (no BEMF sensing
+ * involved yet - commutation_handoff_to_closed_loop() is never
+ * called), NOT fine for closed-loop testing later. Revisit then:
+ * either bodge INLx to real MCU GPIOs and go back to 6PWM, or find a
+ * different closed-loop strategy compatible with 3PWM (e.g. current-
+ * shunt-based sensing instead of comparators).
  *
  * PWM_MODE is a "Standby"-programmable bitfield (datasheet Table 20):
  * it only takes effect while EN_DRV is low, so this must be called
- * before EN_DRV is raised. This board's EN_DRV/CE pin wiring was not
- * part of the pin list you gave me - confirm on the schematic how
- * EN_DRV and CE are driven (dedicated GPIO vs. hardwired) before
- * relying on this sequencing.
+ * before EN_DRV is raised.
  */
 void edl7141_configure_pwm_mode(void);
 

@@ -198,18 +198,19 @@ int main(void)
         fail_forever(); /* step 2 (SPI write) failed */
     }
 
-    /* Leave PWM_CFG in the real desired end state (6PWM) before EN_DRV
-     * goes high - PWM_MODE only latches while EN_DRV is low. Unlike the
-     * test pattern above, this write was never read back and verified -
-     * do that now, since if PWM_MODE somehow isn't really b000 (6PWM),
+    /* Leave PWM_CFG in the real desired end state (3PWM, temporarily -
+     * see the long comment in edl7141_spi.h) before EN_DRV goes high -
+     * PWM_MODE only latches while EN_DRV is low. Unlike the test
+     * pattern above, this write was never read back and verified - do
+     * that now, since if PWM_MODE somehow isn't really b001 (3PWM),
      * INHA wouldn't mean what we assume it means (e.g. in 1PWM mode
      * INHA alone is duty/frequency only, commutation pattern comes from
      * other pins that are all sitting at 0 - nothing would move even
      * with a perfectly clean INHA signal arriving at the chip). */
     edl7141_configure_pwm_mode();
     g_debug_pwm_cfg_readback = edl7141_read_reg(EDL7141_ADDR_PWM_CFG);
-    if (g_debug_pwm_cfg_readback != EDL7141_PWM_MODE_6PWM) {
-        fail_forever(); /* PWM_CFG didn't stick at 6PWM - see g_debug_pwm_cfg_readback */
+    if (g_debug_pwm_cfg_readback != EDL7141_PWM_MODE_3PWM) {
+        fail_forever(); /* PWM_CFG didn't stick at 3PWM - see g_debug_pwm_cfg_readback */
     }
 
     /* This board has no shunt resistors on the driver's CSNx/CSOx pins

@@ -35,12 +35,25 @@ extern volatile uint32_t g_debug_exti_count;
  *
  * Requires the 6EDL7141 to be in 6PWM mode (see edl7141_configure_pwm_mode()
  * in edl7141_spi.c) - NOT 3PWM - because this board grounds INLx. Per the
- * 6EDL7141 datasheet (Rev 1.02, Table 8), with INLx=0, driving INHx=0
+ * 6EDL7141 datasheet (Rev 1.20, Table 8), with INLx=0, driving INHx=0
  * yields GHx=LOW/GLx=LOW/SHx=High-Z, i.e. the inactive phase genuinely
  * floats, which is what apply_step()'s "the two non-driven phases get
  * duty=0" logic below relies on. 3PWM mode ignores INLx entirely and
  * always drives the complementary low side, which would clamp the
  * "floating" phase to GND instead and break BEMF sensing.
+ *
+ * CURRENTLY NOT SATISFIED: edl7141_configure_pwm_mode() presently
+ * writes 3PWM, not 6PWM (see the long comment in edl7141_spi.h) -
+ * INLx being hardwired to GND with no MCU control means 6PWM mode can
+ * never establish real motor current at all (confirmed by real
+ * hardware testing: no current increase with a motor attached, any
+ * duty). 3PWM trades away BEMF-sensing compatibility for real torque,
+ * which is fine for open-loop bring-up (nothing below reads the
+ * comparators yet) but means this module's closed-loop half
+ * (commutation_handoff_to_closed_loop() and everything it enables)
+ * will NOT work correctly until either INLx gets bodged to real GPIOs
+ * and 6PWM is restored, or a non-comparator closed-loop strategy is
+ * built instead.
  *
  * Back-EMF zero-cross detection only works once the motor is already
  * spinning fast enough to produce a usable BEMF signal, so getting the

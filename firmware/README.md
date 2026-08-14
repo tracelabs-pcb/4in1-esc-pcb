@@ -70,33 +70,49 @@ Abschnitt.
 7. Flashen: Board per ST-LINK anschließen, grünen "Debug"- oder
    "Run"-Button drücken.
 
-## 6EDL7141: 6PWM-Modus, nicht 3PWM (wichtig, siehe unten)
+## 6EDL7141: 6PWM vs. 3PWM (Stand: aktuell 3PWM, temporär)
 
-Verifiziert anhand des offiziellen Infineon-Datenblatts (Rev. 1.02,
-2021-09-27), das der Nutzer bereitgestellt hat (Abschnitte 3.2, 7.1.2,
-8.1, 8.2).
+Verifiziert anhand des offiziellen Infineon-Datenblatts (Rev. 1.20,
+2024-03-22, direkt von Infineon/Distributoren nachgeladen).
 
 Die Platine hat wie vorgesehen nur 3 PWM-Leitungen von der MCU zu den
 Gate-Treibern (INHA/INHB/INHC), INLA/INLB/INLC liegen fest auf GND -
-daran ändert sich nichts. Der Punkt betrifft ausschließlich das
-SPI-Register `PWM_CFG` (Adresse 0x13, Bitfeld `PWM_MODE`), das
-festlegt, wie der Chip intern auf INHx/INLx reagiert:
+daran ändert sich nichts (Hardware, kein MCU-Pin). Der Punkt betrifft
+ausschließlich das SPI-Register `PWM_CFG` (Adresse 0x13, Bitfeld
+`PWM_MODE`), das festlegt, wie der Chip intern auf INHx/INLx reagiert:
 
 - **3PWM-Modus** (`PWM_MODE=b001`): laut Datenblatt-Wahrheitstabelle
   (Table 9) ignoriert der Chip INLx komplett und schaltet die Low-Side
-  automatisch komplementär zu INHx. Bei INHx=0 wird GLx **aktiv auf
-  HIGH** gesetzt (Low-Side-FET an) - die "floatende" Phase wird damit
-  hart auf GND gezogen statt zu floaten. Das zerstört die
-  BEMF-Nulldurchgangs-Messung über LM2901/VSTAR komplett.
+  automatisch komplementär zu INHx (mit Dead-Time). Bei INHx=0 wird
+  GLx **aktiv auf HIGH** gesetzt (Low-Side-FET an) - die "floatende"
+  Phase wird damit hart auf GND gezogen statt zu floaten. Das zerstört
+  die BEMF-Nulldurchgangs-Messung über LM2901/VSTAR komplett. **Dafür
+  liefert der Treiber echten, drehmomentfähigen Strom ganz ohne
+  MCU-Zutun an der Low-Side.**
 - **6PWM-Modus** (`PWM_MODE=b000`, Reset-Default): laut Table 8 wertet
   der Chip INHx und INLx unabhängig aus. Mit INLx fest auf GND ergibt
-  INHx=0 → GHx=LOW, GLx=LOW, SHx=High-Z - die Phase floatet tatsächlich.
-  Das ist exakt das Verhalten, das die Komparatorschaltung braucht.
+  INHx=0 → GHx=LOW, GLx=LOW, SHx=High-Z - die Phase floatet tatsächlich,
+  genau das Verhalten, das die Komparatorschaltung braucht. **Aber**:
+  6PWM heißt laut Datenblatt "MCU provides 3 pairs of complementary PWM
+  signals" - der Treiber liefert selbst *keinerlei* automatische
+  Low-Side-Logik (kein `PWM_FREEW_CFG`, das existiert nur für 1PWM/
+  3PWM). Mit `INLx` hart auf GND verdrahtet (statt von der MCU
+  gesteuert, wie in Infineons eigenem 6PWM-Sensorlos-Referenzschaltbild
+  Figure 63) kann in diesem Modus **niemals echter Motorstrom fließen**
+  - beim Ansteuern nur einer Phase (High-Side) haben die anderen beiden
+  Phasen keinen Rückpfad (Low-Side-Body-Dioden leiten nur in die
+  falsche Richtung). Bestätigt durch echten Hardware-Test: keinerlei
+  Stromanstieg mit angeschlossenem Motor, bei jeder Duty.
 
-`edl7141_configure_pwm_mode()` in `src/edl7141_spi.c` schreibt deshalb
-explizit `PWM_CFG = 0x0000` (6PWM). Das ist zwar auch der
-Werksreset-Wert, wird hier aber trotzdem aktiv gesetzt, falls OTP das
-je abweichend programmiert. **Diesen Wert nicht auf 3PWM ändern.**
+**Aktueller Stand**: `edl7141_configure_pwm_mode()` in `src/edl7141_spi.c`
+schreibt `PWM_CFG` auf 3PWM (`0x0001`) - bewusst, um den Motor im
+Open-Loop-Bring-up überhaupt drehen zu können (siehe Git-Log). Das ist
+**nur solange in Ordnung, wie kein BEMF-Sensing gebraucht wird**
+(`commutation_handoff_to_closed_loop()` wird aktuell nirgends
+aufgerufen). Vor echtem Closed-Loop-Test: entweder `INLx` per
+Bodge-Draht auf freie MCU-GPIOs umverdrahten und zurück auf 6PWM, oder
+eine andere Sensorlos-Strategie (z.B. über die INA180A3-Strommessung)
+verfolgen.
 
 `PWM_MODE` ist laut Register-Programmierbarkeits-Tabelle (Table 20)
 nur im "Standby"-Zustand wirksam, d.h. der Schreibzugriff muss
