@@ -57,7 +57,7 @@
 #define RAMP_START_STEP_US 20000UL                         /* 20 ms/step at ramp start */
 #define RAMP_END_STEP_US   3000UL                          /* 3 ms/step at ramp end */
 #define RAMP_STEPS         120UL                           /* 20 electrical revolutions */
-#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 20U) / 100U) /* 20% */
+#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 10U) / 100U) /* 10% */
 #define CRUISE_STEP_MS     3UL  /* matches RAMP_END_STEP_US for a smooth handover; polled, see the cruise loop */
 #define LED_HALF_PERIOD_MS 81UL /* ~80ms, rounded up to a CRUISE_STEP_MS multiple so the division below is exact */
 
