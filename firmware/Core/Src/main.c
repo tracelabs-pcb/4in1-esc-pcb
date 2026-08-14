@@ -42,23 +42,22 @@
  * doesn't move, judders instead of ramping smoothly, or ends up too
  * slow/weak.
  *
- * Duty bumped up from the original 15%/25% for a diagnostic test: at
- * the original values, real hardware testing showed literally zero
- * measurable current increase over the driver's idle draw and zero
- * physical response from the motor. Suspected cause: this board's
- * INLx is hardwired to GND (see gpio_config.h), so the low side can
- * never be actively switched - return current only ever flows
- * passively through a low-side FET's body diode (~0.7V drop), which
- * may simply never build up meaningful winding current at low duty
- * and short pulse widths. Higher duty is a quick, low-risk way to
- * tell "too weak to move" (current/response scales up with duty) apart
- * from "something else entirely wrong" (nothing changes even here). */
-#define ALIGN_DUTY_TICKS   ((PWM_ARR_TICKS * 40U) / 100U) /* 40% */
+ * History: originally 15%/25%, bumped to 40%/70% as a diagnostic test
+ * after 6PWM mode turned out to give zero real motor current at all
+ * (see the 3PWM switch in edl7141_spi.c). That test worked - the motor
+ * spins now - but 70% turned out to draw 3A+ and get very hot on this
+ * specific motor (ReadytoSky 1306 3100KV): small stator, high KV means
+ * low winding resistance, so with no propeller load/cooling airflow
+ * and no synchronization guarantee yet (still open-loop), excess duty
+ * turns straight into I^2R heating rather than useful RPM. Back down
+ * to a safer starting point (10%/20%) for this specific motor - tune
+ * up from here carefully, watching current and temperature. */
+#define ALIGN_DUTY_TICKS   ((PWM_ARR_TICKS * 10U) / 100U) /* 10% */
 #define ALIGN_TIME_US      500000UL                        /* 500 ms */
 #define RAMP_START_STEP_US 20000UL                         /* 20 ms/step at ramp start */
 #define RAMP_END_STEP_US   3000UL                          /* 3 ms/step at ramp end */
 #define RAMP_STEPS         120UL                           /* 20 electrical revolutions */
-#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 70U) / 100U) /* 70% */
+#define RUN_DUTY_TICKS     ((PWM_ARR_TICKS * 20U) / 100U) /* 20% */
 #define CRUISE_STEP_MS     3UL  /* matches RAMP_END_STEP_US for a smooth handover; polled, see the cruise loop */
 #define LED_HALF_PERIOD_MS 81UL /* ~80ms, rounded up to a CRUISE_STEP_MS multiple so the division below is exact */
 
