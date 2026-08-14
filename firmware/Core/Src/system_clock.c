@@ -15,6 +15,25 @@
  */
 void system_clock_init(void)
 {
+    /* Enable full access to the FPU coprocessor (CP10/CP11) before
+     * anything in this project could execute a floating-point
+     * instruction (commutation.c's eRPM calculation, called from
+     * main()'s cruise loop). Found missing via real hardware testing:
+     * this board's STM32F405 build under STM32CubeIDE's bundled
+     * toolchain generates real VFP instructions (confirmed in the
+     * disassembly - e.g. vmov.f32/vldr in zero_cross_calc_erpm()),
+     * unlike this project's own Makefile (-mfloat-abi=soft, verified
+     * to produce zero VFP instructions there). Without this, the first
+     * float instruction executed takes a NOCP UsageFault (escalates to
+     * HardFault, since UsageFault is never individually enabled) - the
+     * exact fault (CFSR=NOCP, HFSR=FORCED) chased through several
+     * false leads (TIM3 IRQ, stack corruption) before being traced
+     * here. The dsb/isb pair is the standard CMSIS idiom to guarantee
+     * the CPACR write has taken effect before anything after it runs. */
+    SCB_CPACR |= (0xFUL << 20); /* CP10 and CP11 = 0b11 (full access) */
+    __asm volatile ("dsb");
+    __asm volatile ("isb");
+
     /* 1. Enable HSE and wait for it to stabilize. */
     RCC->CR |= RCC_CR_HSEON;
     while (!(RCC->CR & RCC_CR_HSERDY)) {

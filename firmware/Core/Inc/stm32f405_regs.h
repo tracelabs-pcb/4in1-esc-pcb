@@ -55,6 +55,14 @@ typedef struct {
 #define NVIC        ((NVIC_TypeDef *) NVIC_BASE)
 #define SCB         ((SCB_TypeDef  *) SCB_BASE)
 
+/* CPACR (Coprocessor Access Control Register) - not adjacent to the
+ * rest of SCB_TypeDef (there's a gap of MPU/debug registers in
+ * between), so it gets its own direct pointer instead of a struct
+ * field. Bits 23:22 = CP11, 21:20 = CP10 (the FPU): 0b11 = full access.
+ * Must be set before executing any floating-point instruction, or it
+ * takes a NOCP UsageFault (see system_clock_init()). */
+#define SCB_CPACR (*(volatile uint32_t *)0xE000ED88UL)
+
 /* CFSR bits worth naming for quick lookup while debugging (ARMv7-M). */
 #define SCB_CFSR_IACCVIOL   (1UL << 0)   /* MMFSR: instruction access violation */
 #define SCB_CFSR_DACCVIOL   (1UL << 1)   /* MMFSR: data access violation */
